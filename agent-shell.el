@@ -47,6 +47,7 @@
 (require 'dired)
 (require 'diff)
 (require 'json)
+(require 'mailcap)
 (require 'map)
 (unless (require 'markdown-overlays nil 'noerror)
   (error "Please update 'shell-maker' to v0.91.2 or newer"))
@@ -5311,30 +5312,32 @@ Returns an alist with:
   :size - file size in bytes
   :extension - file extension (lowercase)
   :mime-type - MIME type based on extension
-  :base64-p - t if content is base64-encoded (binary image), nil otherwise
+  :base64-p - t if content is base64-encoded (binary file), nil otherwise
   :content - file content (omitted when SHALLOW is non-nil)"
   (let* ((ext (downcase (or (file-name-extension file-path) "")))
-         (mime-type (or (agent-shell--image-type-to-mime file-path)
-                        "text/plain"))
-         ;; Only treat supported binary image formats as binary
-         ;; SVG is XML/text and should not be base64-encoded
-         ;; API only supports: image/png, image/jpeg, image/gif, image/webp
-         (is-binary (member mime-type '("image/png" "image/jpeg" "image/gif" "image/webp")))
          (file-size (file-attribute-size (file-attributes file-path)))
-         (content (unless shallow
-                    (with-temp-buffer
-                      (if is-binary
-                          (progn
-                            (insert-file-contents-literally file-path)
-                            (base64-encode-string (buffer-string) t))
-                        (insert-file-contents file-path)
-                        (buffer-string))))))
-    (append (list (cons :size file-size)
-                  (cons :extension ext)
-                  (cons :mime-type mime-type)
-                  (cons :base64-p is-binary))
-            (unless shallow
-              (list (cons :content content))))))
+         (mime-type (mailcap-extension-to-mime ext))
+         (content-fields
+          (unless shallow
+            (let ((raw-content (with-temp-buffer
+                                 (set-buffer-multibyte nil)
+                                 (insert-file-contents-literally file-path)
+                                 (buffer-string)))
+                  ;; Same heuristic that git uses
+                  (is-binary (string-search "\0" raw-content))
+                  (content (if is-binary
+                               (base64-encode-string raw-content)
+                             (decode-coding-string raw-content 'undecided t))))
+              ;; Set a better default MIME type for unknown extensions
+              ;; based on the content
+              (unless mime-type
+                (setq mime-type (if is-binary "application/octet-stream" "text/plain")))
+              `((:base64-p . ,is-binary)
+                (:content . ,content))))))
+    `((:size . ,file-size)
+      (:extension . ,ext)
+      (:mime-type . ,(or mime-type "text/plain"))
+      ,@content-fields)))
 
 (cl-defun agent-shell--load-image (&key file-path (max-width 200))
   "Load image from FILE-PATH and return the image object.
