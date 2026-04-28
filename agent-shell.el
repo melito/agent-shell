@@ -52,6 +52,7 @@
 (require 'agent-shell-auggie)
 (require 'agent-shell-cline)
 (require 'agent-shell-completion)
+(require 'agent-shell-config)
 (require 'agent-shell-cursor)
 (require 'agent-shell-devcontainer)
 (require 'agent-shell-diff)
@@ -6422,119 +6423,6 @@ When DEACTIVATE is non-nil, deactivate region/selection."
 
 ;;; Session modes
 
-;;; Session config options
-
-(defun agent-shell--normalize-config-option-value (value)
-  "Normalize ACP config option VALUE to an internal alist.
-
-For example:
-
-  \\='((value . \"ask\") (name . \"Ask\"))
-  => \\='((:value . \"ask\") (:name . \"Ask\") (:description . nil))"
-  `((:value . ,(map-elt value 'value))
-    (:name . ,(map-elt value 'name))
-    (:description . ,(map-elt value 'description))))
-
-(defun agent-shell--normalize-config-option (option)
-  "Normalize ACP config OPTION to an internal alist.
-
-For example:
-
-  \\='((id . \"mode\") (type . \"select\") (currentValue . \"ask\"))
-  => \\='((:id . \"mode\") (:type . \"select\") (:current-value . \"ask\") ...)"
-  `((:id . ,(map-elt option 'id))
-    (:name . ,(map-elt option 'name))
-    (:description . ,(map-elt option 'description))
-    (:category . ,(map-elt option 'category))
-    (:type . ,(map-elt option 'type))
-    (:current-value . ,(map-elt option 'currentValue))
-    (:options . ,(mapcar #'agent-shell--normalize-config-option-value
-                         (append (map-elt option 'options) nil)))))
-
-(defun agent-shell--normalize-config-options (config-options)
-  "Normalize ACP CONFIG-OPTIONS to internal alists."
-  (mapcar #'agent-shell--normalize-config-option
-          (append config-options nil)))
-
-(cl-defun agent-shell--save-config-options (&key state config-options)
-  "Save ACP CONFIG-OPTIONS in STATE as normalized session config state."
-  (let ((normalized-options (agent-shell--normalize-config-options config-options)))
-    (setf (map-elt state :config-options) normalized-options)
-    (when-let ((session (map-elt state :session)))
-      (setf (map-elt session :config-options) normalized-options)
-      (setf (map-elt state :session) session))))
-
-(defun agent-shell--config-options (state)
-  "Return current config options from STATE."
-  (or (map-nested-elt state '(:session :config-options))
-      (map-elt state :config-options)))
-
-(defun agent-shell--config-option-by-id (state config-id)
-  "Return config option CONFIG-ID from STATE."
-  (seq-find (lambda (option)
-              (equal config-id (map-elt option :id)))
-            (agent-shell--config-options state)))
-
-(defun agent-shell--config-option-by-category (state category)
-  "Return first config option in STATE matching CATEGORY."
-  (seq-find (lambda (option)
-              (equal category (map-elt option :category)))
-            (agent-shell--config-options state)))
-
-(defun agent-shell--select-config-options (state)
-  "Return selectable config options from STATE."
-  (seq-filter (lambda (option)
-                (equal (map-elt option :type) "select"))
-              (agent-shell--config-options state)))
-
-(defun agent-shell--config-option-value-name (option value)
-  "Return display name for OPTION VALUE."
-  (or (map-elt (seq-find (lambda (candidate)
-                           (equal value (map-elt candidate :value)))
-                         (map-elt option :options))
-               :name)
-      value))
-
-(defun agent-shell--config-option-as-models (option)
-  "Return OPTION values in legacy model display shape."
-  (mapcar (lambda (value)
-            `((:model-id . ,(map-elt value :value))
-              (:name . ,(map-elt value :name))
-              (:description . ,(map-elt value :description))))
-          (map-elt option :options)))
-
-(defun agent-shell--config-option-as-modes (option)
-  "Return OPTION values in legacy mode display shape."
-  (mapcar (lambda (value)
-            `((:id . ,(map-elt value :value))
-              (:name . ,(map-elt value :name))
-              (:description . ,(map-elt value :description))))
-          (map-elt option :options)))
-
-(defun agent-shell--model-config-option (state)
-  "Return the model config option from STATE, if any."
-  (agent-shell--config-option-by-category state "model"))
-
-(defun agent-shell--mode-config-option (state)
-  "Return the mode config option from STATE, if any."
-  (agent-shell--config-option-by-category state "mode"))
-
-(defun agent-shell--current-model-id (state)
-  "Return current model ID from STATE."
-  (or (map-elt (agent-shell--model-config-option state) :current-value)
-      (map-nested-elt state '(:session :model-id))))
-
-(defun agent-shell--current-mode-id (state)
-  "Return current mode ID from STATE."
-  (or (map-elt (agent-shell--mode-config-option state) :current-value)
-      (map-nested-elt state '(:session :mode-id))))
-
-(defun agent-shell--get-available-models (state)
-  "Return available models from STATE, preferring config options."
-  (if-let ((model-option (agent-shell--model-config-option state)))
-      (agent-shell--config-option-as-models model-option)
-    (map-nested-elt state '(:session :models))))
-
 ;;; Session modes
 
 (defun agent-shell--get-available-modes (state)
@@ -6896,27 +6784,6 @@ with ON-SUCCESS function."
           name)))
     models)
     "\n\n"))
-
-(defun agent-shell--format-available-config-options (config-options)
-  "Format CONFIG-OPTIONS for shell rendering."
-  (string-join
-   (seq-map
-    (lambda (option)
-      (let ((name (propertize (format "%s (id: %s)"
-                                      (map-elt option :name)
-                                      (map-elt option :id))
-                              'font-lock-face 'font-lock-function-name-face))
-            (current (propertize (format "current: %s"
-                                         (agent-shell--config-option-value-name
-                                          option
-                                          (map-elt option :current-value)))
-                                 'font-lock-face 'font-lock-constant-face))
-            (desc (when (map-elt option :description)
-                    (propertize (map-elt option :description)
-                                'font-lock-face 'font-lock-comment-face))))
-        (string-join (delq nil (list name current desc)) "\n")))
-    config-options)
-   "\n\n"))
 
 ;;; Transient
 
