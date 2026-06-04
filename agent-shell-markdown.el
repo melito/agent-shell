@@ -144,8 +144,10 @@
   :group 'agent-shell-markdown)
 
 (defface agent-shell-markdown-source-block
-  '((t :inherit lazy-highlight :extend t))
+  `((t :background ,(face-attribute 'org-block :background nil t) :extend t))
   "Background face applied to rendered fenced source-block bodies.
+Background is taken from `org-block' so only the block color is
+inherited, letting font-lock keep its own foreground colors.
 `:extend t' makes the background color reach the right edge of
 the window, so the block reads as a contiguous panel rather than
 a per-char highlight."
