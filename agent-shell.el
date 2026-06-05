@@ -3312,23 +3312,29 @@ APPEND and CREATE-NEW control update behavior."
 (defun agent-shell-next-item ()
   "Go to next item.
 
-Could be a prompt or an expandable item.
+Could be a prompt or an expandable item.  When point is inside a
+rendered markdown table, navigate to the next table cell instead.
 If point is at the input prompt and a character key was pressed,
 insert the character instead."
   (declare (modes agent-shell-mode))
   (interactive)
   (unless (derived-mode-p 'agent-shell-mode)
     (error "Not in a shell"))
-  ;; Check if at prompt and inserting a character
-  ;; (Ignore special keys like TAB/Shift-TAB).
-  (if (and (not (shell-maker-busy))
-           (shell-maker-point-at-last-prompt-p)
-           (integerp last-command-event)
-           (> (length (this-command-keys-vector)) 0)
-           ;; Ensure invoked using a key binding.
-           (eq (key-binding (this-command-keys-vector)) this-command))
-      ;; At prompt, insert character.
-      (self-insert-command 1)
+  (cond
+   ;; Check if at prompt and inserting a character
+   ;; (Ignore special keys like TAB/Shift-TAB).
+   ((and (not (shell-maker-busy))
+         (shell-maker-point-at-last-prompt-p)
+         (integerp last-command-event)
+         (> (length (this-command-keys-vector)) 0)
+         ;; Ensure invoked using a key binding.
+         (eq (key-binding (this-command-keys-vector)) this-command))
+    ;; At prompt, insert character.
+    (self-insert-command 1))
+   ;; Inside a rendered markdown table — navigate cells.
+   ((get-text-property (point) 'agent-shell-markdown-table-source)
+    (agent-shell-markdown-table-next-cell))
+   (t
     ;; Otherwise navigate.
     (let* ((prompt-pos (save-mark-and-excursion
                          (when (comint-next-prompt 1)
@@ -3344,28 +3350,34 @@ insert the character instead."
         (deactivate-mark)
         (goto-char next-pos)
         (when (eq next-pos prompt-pos)
-          (comint-skip-prompt))))))
+          (comint-skip-prompt)))))))
 
 (defun agent-shell-previous-item ()
   "Go to previous item.
 
-Could be a prompt or an expandable item.
+Could be a prompt or an expandable item.  When point is inside a
+rendered markdown table, navigate to the previous table cell instead.
 If point is at the input prompt and a character key was pressed,
 insert the character instead."
   (declare (modes agent-shell-mode))
   (interactive)
   (unless (derived-mode-p 'agent-shell-mode)
     (error "Not in a shell"))
-  ;; Check if at prompt and inserting a character
-  ;; (Ignore special keys like TAB/Shift-TAB).
-  (if (and (not (shell-maker-busy))
-           (shell-maker-point-at-last-prompt-p)
-           (integerp last-command-event)
-           (> (length (this-command-keys-vector)) 0)
-           ;; Ensure invoked using a key binding.
-           (eq (key-binding (this-command-keys-vector)) this-command))
-      ;; At prompt, insert character.
-      (self-insert-command 1)
+  (cond
+   ;; Check if at prompt and inserting a character
+   ;; (Ignore special keys like TAB/Shift-TAB).
+   ((and (not (shell-maker-busy))
+         (shell-maker-point-at-last-prompt-p)
+         (integerp last-command-event)
+         (> (length (this-command-keys-vector)) 0)
+         ;; Ensure invoked using a key binding.
+         (eq (key-binding (this-command-keys-vector)) this-command))
+    ;; At prompt, insert character.
+    (self-insert-command 1))
+   ;; Inside a rendered markdown table — navigate cells.
+   ((get-text-property (point) 'agent-shell-markdown-table-source)
+    (agent-shell-markdown-table-previous-cell))
+   (t
     ;; Otherwise navigate.
     (let* ((current-pos (point))
            (prompt-pos (save-mark-and-excursion
@@ -3390,7 +3402,7 @@ insert the character instead."
         (deactivate-mark)
         (goto-char next-pos)
         (when (eq next-pos prompt-pos)
-          (comint-skip-prompt))))))
+          (comint-skip-prompt)))))))
 
 (cl-defun agent-shell-make-environment-variables (&rest vars &key inherit-env load-env &allow-other-keys)
   "Return VARS in the form expected by `process-environment'.

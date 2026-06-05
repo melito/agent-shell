@@ -34,6 +34,7 @@
 (require 'window)
 (require 'flymake)
 (require 'agent-shell-list-edit)
+(require 'agent-shell-markdown)
 (require 'markdown-overlays)
 (require 'shell-maker)
 (require 'transient)
@@ -516,83 +517,91 @@ Optionally set its PROMPT and RESPONSE."
 (defun agent-shell-viewport-next-item ()
   "Go to next item.
 
-If at point-max, attempt to switch to next interaction."
+When point is inside a rendered markdown table, navigate to the
+next table cell instead.  If at point-max, attempt to switch to
+next interaction."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
   (unless (derived-mode-p 'agent-shell-viewport-view-mode)
     (error "Not in a viewport buffer"))
-  (let* ((current-pos (point))
-         (prompt-start (agent-shell-viewport--prompt-start))
-         (response-start (agent-shell-viewport--response-start))
-         (block-pos (save-mark-and-excursion
-                      (agent-shell-ui-forward-block)))
-         (button-pos (save-mark-and-excursion
-                       (agent-shell-next-permission-button)))
-         ;; Filter positions to only those after current position
-         (candidates (delq nil (list
-                                (when (and prompt-start (> prompt-start current-pos))
-                                  prompt-start)
-                                (when (and response-start (> response-start current-pos))
-                                  response-start)
-                                block-pos
-                                button-pos)))
-         (next-pos (if candidates
-                       (apply #'min candidates)
-                     ;; No more items, try point-max if not already there
-                     (when (< current-pos (point-max))
-                       (point-max)))))
-    (if next-pos
-        (progn
-          (deactivate-mark)
-          (goto-char next-pos))
-      ;; At point-max with no more items, try next interaction
-      (condition-case nil
-          (agent-shell-viewport-next-page)
-        (error
-         ;; At the end of all interactions, stay at point-max
-         nil)))))
+  (if (get-text-property (point) 'agent-shell-markdown-table-source)
+      (agent-shell-markdown-table-next-cell)
+    (let* ((current-pos (point))
+           (prompt-start (agent-shell-viewport--prompt-start))
+           (response-start (agent-shell-viewport--response-start))
+           (block-pos (save-mark-and-excursion
+                        (agent-shell-ui-forward-block)))
+           (button-pos (save-mark-and-excursion
+                         (agent-shell-next-permission-button)))
+           ;; Filter positions to only those after current position
+           (candidates (delq nil (list
+                                  (when (and prompt-start (> prompt-start current-pos))
+                                    prompt-start)
+                                  (when (and response-start (> response-start current-pos))
+                                    response-start)
+                                  block-pos
+                                  button-pos)))
+           (next-pos (if candidates
+                         (apply #'min candidates)
+                       ;; No more items, try point-max if not already there
+                       (when (< current-pos (point-max))
+                         (point-max)))))
+      (if next-pos
+          (progn
+            (deactivate-mark)
+            (goto-char next-pos))
+        ;; At point-max with no more items, try next interaction
+        (condition-case nil
+            (agent-shell-viewport-next-page)
+          (error
+           ;; At the end of all interactions, stay at point-max
+           nil))))))
 
 (defun agent-shell-viewport-previous-item ()
   "Go to previous item.
 
-If at the first item, attempt to switch to previous interaction."
+When point is inside a rendered markdown table, navigate to the
+previous table cell instead.  If at the first item, attempt to
+switch to previous interaction."
   (declare (modes agent-shell-viewport-view-mode))
   (interactive)
   (unless (derived-mode-p 'agent-shell-viewport-view-mode)
     (error "Not in a viewport buffer"))
-  (let* ((current-pos (point))
-         (prompt-start (agent-shell-viewport--prompt-start))
-         (response-start (agent-shell-viewport--response-start))
-         (block-pos (save-mark-and-excursion
-                      (let ((pos (agent-shell-ui-backward-block)))
-                        (when (and pos (< pos current-pos))
-                          pos))))
-         (button-pos (save-mark-and-excursion
-                       (let ((pos (agent-shell-previous-permission-button)))
-                         (when (and pos (< pos current-pos))
-                           pos))))
-         ;; Filter positions to only those before current position
-         (candidates (delq nil (list
-                                (when (and prompt-start (< prompt-start current-pos))
-                                  prompt-start)
-                                (when (and response-start (< response-start current-pos))
-                                  response-start)
-                                block-pos
-                                button-pos)))
-         (next-pos (when candidates
-                     (apply #'max candidates))))
-    (if next-pos
-        (progn
-          (deactivate-mark)
-          (goto-char next-pos))
-      ;; No more items before current position, try previous interaction
-      (condition-case nil
-          ;; Switch to previous page and stop at point-max (call next-interaction directly)
-          (agent-shell-viewport-next-page :backwards t)
-        (error
-         ;; At the beginning of all interactions, stay at first item
-         (when prompt-start
-           (goto-char prompt-start)))))))
+  (if (get-text-property (point) 'agent-shell-markdown-table-source)
+      (agent-shell-markdown-table-previous-cell)
+    (let* ((current-pos (point))
+           (prompt-start (agent-shell-viewport--prompt-start))
+           (response-start (agent-shell-viewport--response-start))
+           (block-pos (save-mark-and-excursion
+                        (let ((pos (agent-shell-ui-backward-block)))
+                          (when (and pos (< pos current-pos))
+                            pos))))
+           (button-pos (save-mark-and-excursion
+                         (let ((pos (agent-shell-previous-permission-button)))
+                           (when (and pos (< pos current-pos))
+                             pos))))
+           ;; Filter positions to only those before current position
+           (candidates (delq nil (list
+                                  (when (and prompt-start (< prompt-start current-pos))
+                                    prompt-start)
+                                  (when (and response-start (< response-start current-pos))
+                                    response-start)
+                                  block-pos
+                                  button-pos)))
+           (next-pos (when candidates
+                       (apply #'max candidates))))
+      (if next-pos
+          (progn
+            (deactivate-mark)
+            (goto-char next-pos))
+        ;; No more items before current position, try previous interaction
+        (condition-case nil
+            ;; Switch to previous page and stop at point-max (call next-interaction directly)
+            (agent-shell-viewport-next-page :backwards t)
+          (error
+           ;; At the beginning of all interactions, stay at first item
+           (when prompt-start
+             (goto-char prompt-start))))))))
 
 (defconst agent-shell-viewport--suffix " [viewport]"
   "Suffix appended to shell buffer name to create viewport buffer name.")
