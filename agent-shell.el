@@ -2724,7 +2724,7 @@ for details."
         file-path))))))
 
 (defcustom agent-shell-status-kind-label-function
-  #'agent-shell--default-status-kind-label
+  #'agent-shell--inverse-icon-status-kind-label
   "Function to render status and kind labels.
 
 Called with two arguments: STATUS (string or nil) and KIND (string or nil).
