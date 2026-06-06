@@ -1408,6 +1408,7 @@ If DELETE is non-nil, delete the text between START and END."
   "<backtab>" #'agent-shell-previous-item
   "n" #'agent-shell-next-item
   "p" #'agent-shell-previous-item
+  "r" #'agent-shell-quote-region
   "C-<tab>" #'agent-shell-cycle-session-mode
   "C-c C-c" #'agent-shell-interrupt
   "C-c C-m" #'agent-shell-set-session-mode
@@ -7038,6 +7039,35 @@ When DEACTIVATE is non-nil, deactivate region/selection."
               "\n"
               "```"))))
 
+(defun agent-shell--block-quote (text)
+  "Return TEXT with each line prefixed by \"> \", displayed as a bar.
+
+Underlying text keeps the \"> \" so it remains valid markdown;
+the bar is a display-only override.  Yanks strip both the bar
+styling and the leading \"> \" so paste gives plain text."
+  (let* ((bar      (propertize "▌" 'face 'font-lock-comment-face))
+         (wrap     (propertize "▌ " 'face 'font-lock-comment-face))
+         (quoted   (concat "> " (replace-regexp-in-string
+                                 (rx "\n") "\n> " text)))
+         (rendered (copy-sequence quoted))
+         (pos      0))
+    (add-text-properties
+     0 (length rendered)
+     (list 'wrap-prefix wrap
+           'face 'font-lock-comment-face
+           'yank-handler
+           (list (lambda (s)
+                   (insert
+                    (replace-regexp-in-string
+                     (rx line-start "> ") ""
+                     (substring-no-properties s))))))
+     rendered)
+    (while (string-match (rx line-start ">") rendered pos)
+      (put-text-property (match-beginning 0) (match-end 0)
+                         'display bar rendered)
+      (setq pos (match-end 0)))
+    rendered))
+
 ;;; Session modes
 
 (defun agent-shell--get-available-modes (state)
@@ -7772,6 +7802,23 @@ Remove: M-x agent-shell-remove-pending-request
               (append pending (list prompt)))
     (message "Request queued (%d pending)" (length (map-elt agent-shell--state :pending-requests)))))
 
+(cl-defun agent-shell--read-queue-prompt (&key initial)
+  "Read a queue-request prompt from the minibuffer.
+
+When INITIAL is non-nil, prefill the minibuffer with it and leave
+point at the end (ready to type below the prefill).
+
+While reading, @ completes project files and / completes available
+agent commands when the agent has reported them."
+  (let ((shell-buffer (current-buffer)))
+    (minibuffer-with-setup-hook
+        (lambda ()
+          (agent-shell-completion--setup-minibuffer shell-buffer)
+          (when initial
+            (insert initial)))
+      (read-string (or (map-nested-elt (agent-shell--state) '(:agent-config :shell-prompt))
+                       "Enqueue request: ")))))
+
 (defun agent-shell-queue-request (prompt)
   "Queue or immediately send a request depending on shell busy state.
 
@@ -7785,16 +7832,48 @@ commands when the agent has reported them."
    (progn
      (unless (derived-mode-p 'agent-shell-mode)
        (error "Not in a shell"))
-     (let ((shell-buffer (current-buffer)))
-       (list
-        (minibuffer-with-setup-hook
-            (lambda ()
-              (agent-shell-completion--setup-minibuffer shell-buffer))
-          (read-string (or (map-nested-elt (agent-shell--state) '(:agent-config :shell-prompt))
-                           "Enqueue request: ")))))))
+     (list (agent-shell--read-queue-prompt))))
   (if (shell-maker-busy)
       (agent-shell--enqueue-request :prompt prompt)
     (agent-shell--insert-to-shell-buffer :text prompt :submit t :no-focus t)))
+
+(defun agent-shell-quote-region ()
+  "Quote the active region into the shell's latest prompt.
+
+If point is at the last prompt, behave as regular editing (typing
+the originating key) so the user can type `r' as plain input.
+
+Otherwise, when a region is active, wrap it as a Markdown block quote.
+If the shell is not busy, insert the quote at the latest prompt with
+point left below it, ready to type.  If the shell is busy, read a
+follow-up request in the minibuffer prefilled with the block quote
+and queue it via `agent-shell-queue-request'."
+  (declare (modes agent-shell-mode))
+  (interactive)
+  (unless (derived-mode-p 'agent-shell-mode)
+    (error "Not in a shell"))
+  (cond
+   ;; At prompt + not busy: behave as regular editing.
+   ((and (not (shell-maker-busy))
+         (shell-maker-point-at-last-prompt-p)
+         (integerp last-command-event)
+         (> (length (this-command-keys-vector)) 0)
+         (eq (key-binding (this-command-keys-vector)) this-command))
+    (self-insert-command 1))
+   ;; Region active and not at prompt: quote into prompt or queue.
+   ((and (not (shell-maker-point-at-last-prompt-p))
+         (region-active-p))
+    (let ((quoted (agent-shell--block-quote
+                   (string-trim
+                    (map-elt (agent-shell--get-region :deactivate t) :content)))))
+      (if (shell-maker-busy)
+          (agent-shell-queue-request
+           (agent-shell--read-queue-prompt :initial (concat "\n\n" quoted "\n\n")))
+        (goto-char (point-max))
+        (insert "\n\n" quoted "\n\n"))))
+   ;; Otherwise: fall back to self-insert.
+   (t
+    (self-insert-command 1))))
 
 (defun agent-shell-resume-pending-requests ()
   "Resume processing pending requests in the queue."

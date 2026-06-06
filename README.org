@@ -908,6 +908,7 @@ always go to Evil modes if you need to with ~C-z~).
 |                 | agent-shell-previous-permission-button                  | Jump to the previous button.                                                  |
 |                 | agent-shell-prompt-compose                              | Compose an `agent-shell' prompt in a dedicated buffer.                        |
 |                 | agent-shell-queue-request                               | Queue or immediately send a request depending on shell busy state.            |
+| r               | agent-shell-quote-region                                | Quote the active region into the shell's latest prompt.                       |
 |                 | agent-shell-qwen-start                                  | Start an interactive Qwen Code CLI agent shell.                               |
 |                 | agent-shell-remove-pending-request                      | Remove all pending requests or a specific request by REMOVE-INDEX.            |
 | C-x x r         | agent-shell-rename-buffer                               | Rename current shell buffer.                                                  |

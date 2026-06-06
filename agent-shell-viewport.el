@@ -42,6 +42,7 @@
 (eval-when-compile
   (require 'cl-lib))
 
+(declare-function agent-shell--block-quote "agent-shell")
 (declare-function agent-shell--current-shell "agent-shell")
 (declare-function agent-shell--display-buffer "agent-shell")
 (declare-function agent-shell--next-command-and-response "agent-shell")
@@ -624,35 +625,6 @@ With EXISTING-ONLY, only return existing buffers without creating."
               (agent-shell-viewport-edit-mode)
               (current-buffer))))))))
 
-(defun agent-shell-viewport--block-quote (text)
-  "Return TEXT with each line prefixed by \"> \", displayed as a bar.
-
-Underlying text keeps the \"> \" so it remains valid markdown;
-the bar is a display-only override.  Yanks strip both the bar
-styling and the leading \"> \" so paste gives plain text."
-  (let* ((bar      (propertize "▌" 'face 'font-lock-comment-face))
-         (wrap     (propertize "▌ " 'face 'font-lock-comment-face))
-         (quoted   (concat "> " (replace-regexp-in-string
-                                 (rx "\n") "\n> " text)))
-         (rendered (copy-sequence quoted))
-         (pos      0))
-    (add-text-properties
-     0 (length rendered)
-     (list 'wrap-prefix wrap
-           'face 'font-lock-comment-face
-           'yank-handler
-           (list (lambda (s)
-                   (insert
-                    (replace-regexp-in-string
-                     (rx line-start "> ") ""
-                     (substring-no-properties s))))))
-     rendered)
-    (while (string-match (rx line-start ">") rendered pos)
-      (put-text-property (match-beginning 0) (match-end 0)
-                         'display bar rendered)
-      (setq pos (match-end 0)))
-    rendered))
-
 (cl-defun agent-shell-viewport--setup-reply (&key quoted-text)
   "Set up the buffer to compose a reply.
 
@@ -668,7 +640,7 @@ QUOTED-TEXT is inserted as a block quote as part of the reply."
     (when quoted-text
       (goto-char (point-max))
       (insert (if snapshot "\n\n" "")
-              (agent-shell-viewport--block-quote quoted-text) "\n\n"))
+              (agent-shell--block-quote quoted-text) "\n\n"))
     ;; Skip past any cursor-intangible layout text (e.g. the
     ;; newline inserted by `agent-shell-viewport--initialize')
     ;; so callers like `agent-shell-viewport-reply-1' can insert.
