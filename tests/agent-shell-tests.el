@@ -334,9 +334,10 @@
           (cl-letf (((symbol-function 'agent-shell-cwd)
                      (lambda () default-directory)))
 
-            (if (display-images-p)
-                ;; Graphical Emacs: image-supported-file-p recognises PNG,
-                ;; so the image code-path is reachable.
+            (if (image-supported-file-p temp-file)
+                ;; Emacs has PNG support compiled in — image-supported-file-p
+                ;; recognises PNG (works in `--batch' too), so the image
+                ;; code-path is reachable.
                 (progn
                   ;; Test with image and embedded context support - should use ContentBlock::Image
                   (let ((agent-shell--state (list
@@ -384,9 +385,10 @@
                         (should (equal (map-elt resource-link 'name) file-name))
                         (should (equal (map-elt resource-link 'size) 69))))))
 
-              ;; Non-graphical Emacs: image-supported-file-p is unavailable,
-              ;; so the PNG is treated as text/plain by the MIME resolver.
-              ;; Verify the resource_link fallback still works.
+              ;; Emacs built without PNG support: image-supported-file-p
+              ;; returns nil, so the PNG is treated as text/plain by the
+              ;; MIME resolver.  Verify the resource_link fallback still
+              ;; works.
               (let ((agent-shell--state (list
                                          (cons :prompt-capabilities '((:image . t) (:embedded-context . t))))))
                 (let ((blocks (agent-shell--build-content-blocks (format "Analyze @%s" file-name))))
@@ -3024,36 +3026,36 @@ agent activity; consecutive user chunks stay in the same turn."
     (should (= 1 (length (agent-shell-tests--pending-restore-prompt-turns state))))))
 
 (ert-deftest agent-shell--use-session-load-p-modes ()
-  "Test `agent-shell--use-session-load-p' across context/protocol combinations."
-  ;; summary mode forces session/load when supported
-  (let ((agent-shell-restore-context 'summary))
+  "Test `agent-shell--use-session-load-p' across verbosity/protocol combinations."
+  ;; `last' mode forces session/load when supported
+  (let ((agent-shell-session-restore-verbosity 'last))
     (should (agent-shell--use-session-load-p
              '((:supports-session-load . t)
                (:supports-session-resume . t))))
-    ;; summary falls back to resume when load unsupported
+    ;; `last' falls back to resume when load unsupported
     (should-not (agent-shell--use-session-load-p
                  '((:supports-session-load . nil)
                    (:supports-session-resume . t)))))
-  ;; full mode forces session/load when supported
-  (let ((agent-shell-restore-context 'full))
+  ;; `full' mode forces session/load when supported
+  (let ((agent-shell-session-restore-verbosity 'full))
     (should (agent-shell--use-session-load-p
              '((:supports-session-load . t)
                (:supports-session-resume . t)))))
-  ;; minimal mode prefers resume when available
-  (let ((agent-shell-restore-context 'minimal))
+  ;; `minimal' mode prefers resume when available
+  (let ((agent-shell-session-restore-verbosity 'minimal))
     (should-not (agent-shell--use-session-load-p
                  '((:supports-session-load . t)
                    (:supports-session-resume . t))))
-    ;; minimal falls back to load when resume unavailable
+    ;; `minimal' falls back to load when resume unavailable
     (should (agent-shell--use-session-load-p
              '((:supports-session-load . t)
                (:supports-session-resume . nil))))))
 
 (ert-deftest agent-shell--initiate-session-summary-mode-uses-session-load ()
-  "Test that `summary' mode bypasses `session/resume' in favor of `session/load'."
+  "Test that `last' verbosity bypasses `session/resume' in favor of `session/load'."
   (with-temp-buffer
     (let* ((agent-shell-session-strategy 'latest)
-           (agent-shell-restore-context 'summary)
+           (agent-shell-session-restore-verbosity 'last)
            (requests '())
            (session-init-called nil)
            (state (list (cons :buffer (current-buffer))
