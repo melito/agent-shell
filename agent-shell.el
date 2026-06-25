@@ -887,6 +887,14 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
 (defvar-local agent-shell--transcript-file nil
   "Path to the shell's transcript file.")
 
+(defun agent-shell--cleanup-default-directory ()
+  "Delete the current buffer's `default-directory'.
+Only attach this to shells created by `agent-shell-new-temp-shell',
+whose `default-directory' is a disposable temp dir.  Attaching it to
+an ordinary shell would delete its working directory."
+  (when (file-directory-p default-directory)
+    (delete-directory default-directory t t)))
+
 (defvar agent-shell--shell-maker-config nil)
 
 ;;;###autoload
@@ -1042,9 +1050,7 @@ When NO-DISPLAY is non-nil, don't display the shell buffer."
                                                :no-display no-display)))
     (with-current-buffer shell-buffer
       (add-hook 'kill-buffer-hook
-                (lambda ()
-                  (when (file-directory-p location)
-                    (delete-directory location t t)))
+                #'agent-shell--cleanup-default-directory
                 nil t))
     shell-buffer))
 
@@ -1108,12 +1114,16 @@ Works from both shell and viewport buffers."
          (config (map-elt (buffer-local-value 'agent-shell--state shell-buffer)
                           :agent-config))
          (shell-dir (buffer-local-value 'default-directory shell-buffer))
+         (is-temp-shell (memq #'agent-shell--cleanup-default-directory
+                              (buffer-local-value 'kill-buffer-hook
+                                                  shell-buffer)))
          ;; Remember where the shell is currently displayed
          (windows (get-buffer-window-list shell-buffer nil t)))
     (with-current-buffer shell-buffer
       (when (and (agent-shell--active-requests-p (agent-shell--state))
                  (not (y-or-n-p "Agent is busy.  Restart anyway?")))
-        (user-error "Cancelled")))
+        (user-error "Cancelled"))
+      (remove-hook 'kill-buffer-hook #'agent-shell--cleanup-default-directory t))
     (kill-buffer shell-buffer)
     (let* ((default-directory shell-dir)
            (new-shell-buffer (agent-shell--start
@@ -1123,6 +1133,11 @@ Works from both shell and viewport buffers."
                               :new-session t
                               :no-focus t)))
       (shell-maker-set-buffer-name new-shell-buffer shell-buffer-name)
+      (when is-temp-shell
+        (with-current-buffer new-shell-buffer
+          (add-hook 'kill-buffer-hook
+                    #'agent-shell--cleanup-default-directory
+                    nil t)))
       (if (or from-viewport agent-shell-prefer-viewport-interaction)
           (agent-shell-viewport--show-buffer
            :shell-buffer new-shell-buffer)
