@@ -1759,7 +1759,7 @@ not in agent-shell."
 violates the ACP protocol — per-turn updates must arrive while
 a `session/prompt' is active.
 
-This is a bug in %s, not in agent-shell.  Please report it to
+This is a bug in %s ACP implementation, not in agent-shell.  Please report it to
 the maintainer with the payload below:
 
 ```json
@@ -1829,7 +1829,7 @@ pretty-printed JSON inside a json fence."
          (agent-shell--update-fragment
           :state state
           :block-id "out-of-turn-acp-bug"
-          :label-left (propertize "Out of turn — ACP server bug"
+          :label-left (propertize "Out of turn - ACP server bug"
                                   'font-lock-face 'font-lock-doc-markup-face)
           :body (agent-shell--make-out-of-session-turn-notification-body state acp-notification)
           :append t
