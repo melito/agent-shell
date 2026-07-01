@@ -603,11 +603,18 @@ See `agent-shell-*-make-*-config' for details."
 (defcustom agent-shell-preferred-agent-config nil
   "Default agent to use for all new shells.
 
-If this is set, `agent-shell' will unconditionally use this
-agent and not prompt you to select one.
+If this is set to an agent identifier (e.g., `claude-code'),
+`agent-shell' will unconditionally use that agent and not prompt you
+to select one.  A full configuration alist is also accepted for
+backwards compatibility.
 
-Can be set to a symbol identifier (e.g., `claude-code') or a full
-configuration alist for backwards compatibility."
+To keep the picker but have an agent preselected as the default,
+wrap the identifier in a cons cell:
+
+  (setq agent-shell-preferred-agent-config \\='(preselect . claude-code))
+
+The equivalent `(auto . claude-code)' spells out the unconditional
+behavior explicitly."
   :type '(choice (const :tag "None (prompt each time)" nil)
                  (const :tag "Auggie" auggie)
                  (const :tag "Claude Code" claude-code)
@@ -627,6 +634,10 @@ configuration alist for backwards compatibility."
                  (const :tag "Pi" pi)
                  (const :tag "Qwen Code" qwen-code)
                  (symbol :tag "Custom identifier")
+                 (cons :tag "Preselect in picker (still prompt)"
+                       (const preselect) (symbol :tag "Agent identifier"))
+                 (cons :tag "Use unconditionally (explicit)"
+                       (const auto) (symbol :tag "Agent identifier"))
                  (alist :tag "Full configuration (legacy)"
                         :key-type symbol :value-type sexp))
   :group 'agent-shell)
@@ -746,21 +757,49 @@ variable when both are set."
                  function)
   :group 'agent-shell)
 
-(defun agent-shell--resolve-preferred-config ()
-  "Resolve `agent-shell-preferred-agent-config' to a full configuration.
+(defun agent-shell--resolve-config-designator (designator)
+  "Resolve DESIGNATOR to a full configuration.
 
-If the value is a symbol, look it up in `agent-shell-agent-configs'.
+If DESIGNATOR is a symbol, look it up in `agent-shell-agent-configs'.
 If it's already an alist (legacy format), return it as-is.
 Returns nil if no matching configuration is found."
   (cond
-   ((null agent-shell-preferred-agent-config) nil)
-   ((symbolp agent-shell-preferred-agent-config)
+   ((null designator) nil)
+   ((symbolp designator)
     (seq-find (lambda (config)
-                (eq (map-elt config :identifier)
-                    agent-shell-preferred-agent-config))
+                (eq (map-elt config :identifier) designator))
               agent-shell-agent-configs))
-   ((listp agent-shell-preferred-agent-config)
-    agent-shell-preferred-agent-config)))
+   ((listp designator) designator)))
+
+(defun agent-shell--preferred-config-and-mode ()
+  "Return (CONFIG . PRESELECT) for `agent-shell-preferred-agent-config'.
+
+CONFIG is the resolved configuration alist, or nil when none is set.
+PRESELECT is non-nil when the picker should still be shown with CONFIG
+offered as the default, instead of selecting CONFIG unconditionally."
+  (pcase agent-shell-preferred-agent-config
+    ('nil nil)
+    (`(preselect . ,designator)
+     (cons (agent-shell--resolve-config-designator designator) t))
+    (`(auto . ,designator)
+     (cons (agent-shell--resolve-config-designator designator) nil))
+    (designator
+     (cons (agent-shell--resolve-config-designator designator) nil))))
+
+(defun agent-shell--resolve-preferred-config ()
+  "Resolve `agent-shell-preferred-agent-config' to a full configuration.
+
+Returns the configuration whether it is used automatically or only
+preselected in the picker.  Returns nil if none is configured."
+  (car (agent-shell--preferred-config-and-mode)))
+
+(defun agent-shell--auto-preferred-config ()
+  "Return the preferred configuration only when it should bypass the picker.
+
+Returns nil when no preference is set, or when the preference is
+configured to merely preselect (see `agent-shell-preferred-agent-config')."
+  (pcase (agent-shell--preferred-config-and-mode)
+    (`(,config . nil) config)))
 
 (defcustom agent-shell-mcp-servers nil
   "List of MCP servers to initialize when creating a new session.
@@ -956,7 +995,7 @@ handles viewport mode detection, existing shell reuse, and project context."
                        (agent-shell--read-shell-buffer :prompt "Switch to shell: "))
                       (new-shell
                        (agent-shell--start :config (or config
-                                                       (agent-shell--resolve-preferred-config)
+                                                       (agent-shell--auto-preferred-config)
                                                        (agent-shell-select-config
                                                         :prompt "Start new agent: ")
                                                        (error "No agent config found"))
@@ -989,7 +1028,7 @@ handles viewport mode detection, existing shell reuse, and project context."
                                                     :shell-buffer shell-buffer))))
           (new-shell
            (agent-shell-start :config (or config
-                                          (agent-shell--resolve-preferred-config)
+                                          (agent-shell--auto-preferred-config)
                                           (agent-shell-select-config
                                            :prompt "Start new agent: ")
                                           (error "No agent config found"))))
@@ -1081,7 +1120,7 @@ When NO-DISPLAY is non-nil, don't display the shell buffer."
   (let* ((default-directory location)
          (shell-buffer (agent-shell--start
                         :config (or config
-                                    (agent-shell--resolve-preferred-config)
+                                    (agent-shell--auto-preferred-config)
                                     (agent-shell-select-config
                                      :prompt "Start new agent: ")
                                     (error "No agent config found"))
@@ -1220,7 +1259,7 @@ the session identified by SESSION-ID."
   (interactive "sSession ID: ")
   (when (string-empty-p (string-trim session-id))
     (user-error "Session ID cannot be empty"))
-  (agent-shell--start :config (or (agent-shell--resolve-preferred-config)
+  (agent-shell--start :config (or (agent-shell--auto-preferred-config)
                                   (agent-shell-select-config
                                    :prompt "Resume with agent: ")
                                   (error "No agent config found"))
@@ -1280,8 +1319,15 @@ Returns nil if no icon should be displayed."
       (buffer-string))))
 
 (cl-defun agent-shell-select-config (&key prompt)
-  "Display PROMPT to select an agent config from `agent-shell-agent-configs'."
-  (let* ((choices (mapcar
+  "Display PROMPT to select an agent config from `agent-shell-agent-configs'.
+
+When `agent-shell-preferred-agent-config' is set, its configuration is
+listed first and offered as the default selection."
+  (let* ((preferred (agent-shell--resolve-preferred-config))
+         (configs (if preferred
+                      (cons preferred (remove preferred agent-shell-agent-configs))
+                    agent-shell-agent-configs))
+         (choices (mapcar
                    (lambda (config)
                      (cons (propertize
                             (or (map-elt config :mode-line-name)
@@ -1291,20 +1337,26 @@ Returns nil if no icon should be displayed."
                             (when agent-shell-show-config-icons
                               (agent-shell--config-icon :config config)))
                            config))
-                   agent-shell-agent-configs))
+                   configs))
+         (default-name (when preferred (caar choices)))
          (completion-extra-properties '(:category agent-shell-config))
          (completion-styles (cons 'substring completion-styles))
          (selected-name (completing-read
-                         (or prompt "Select agent: ")
+                         (if default-name
+                             (format-prompt
+                              (string-remove-suffix ": " (or prompt "Select agent"))
+                              default-name)
+                           (or prompt "Select agent: "))
                          (lambda (string pred action)
                            (if (eq action 'metadata)
                                '(metadata
                                  (category . agent-shell-config)
+                                 (display-sort-function . identity)
                                  (affixation-function
                                   . agent-shell--icon-affixation))
                              (complete-with-action action (mapcar #'car choices)
                                                    string pred)))
-                         nil t)))
+                         nil t nil nil default-name)))
     (map-elt choices selected-name)))
 
 (defun agent-shell-buffers ()
@@ -6228,13 +6280,13 @@ Returns a buffer object or nil."
                ((equal choice start-temp)
                 (agent-shell-new-temp-shell :no-display t))
                (t
-                (agent-shell--start :config (or (agent-shell--resolve-preferred-config)
+                (agent-shell--start :config (or (agent-shell--auto-preferred-config)
                                                 (agent-shell-select-config
                                                  :prompt "Start new agent: ")
                                                 (error "No agent config found"))
                                     :no-focus t
                                     :new-session t))))
-          (agent-shell--start :config (or (agent-shell--resolve-preferred-config)
+          (agent-shell--start :config (or (agent-shell--auto-preferred-config)
                                           (agent-shell-select-config
                                            :prompt "Start new agent: ")
                                           (error "No agent config found"))
