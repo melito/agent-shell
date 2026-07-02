@@ -1289,6 +1289,8 @@ preserved so callers never observe the mutation."
         (let ((m (point-marker)))
           (set-marker-insertion-type m nil)
           (insert str)
+          ;; Strip `line-prefix' / `wrap-prefix' before measuring
+          (remove-text-properties m (point) '(line-prefix nil wrap-prefix nil))
           (setq real (car (window-text-pixel-size window m (point))))
           (delete-region m (point))
           (set-marker m nil)))
