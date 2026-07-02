@@ -37,7 +37,9 @@
 ;;   header      `# X' .. `###### X'      face `agent-shell-markdown-header-1' .. `-6'
 ;;   inline code `` `X` ``                face `agent-shell-markdown-inline-code'
 ;;   link        `[title](url)'           face `agent-shell-markdown-link', keymap opens URL
+;;                 (`(<url>)' also OK — angle brackets allow spaces in the url)
 ;;   image       `![alt](url)'            `display' property carries image
+;;                 (`(<url>)' also OK — angle brackets allow spaces in the url)
 ;;   image path  bare image path on a line  same as `![alt](url)' (no markup)
 ;;   divider     `---' / `***' / `___'    rendered as an underlined rule line
 ;;   fenced code ```LANG\nX\n```          body syntax-highlighted via LANG mode
@@ -255,9 +257,9 @@ For example:
   (agent-shell-markdown-convert \"_my_ **text**\")
   => #(\"my text\" 0 2 (face italic) 3 7 (face bold))"
   (agent-shell-with-work-buffer
-    (insert markdown)
-    (agent-shell-markdown-replace-markup)
-    (buffer-string)))
+   (insert markdown)
+   (agent-shell-markdown-replace-markup)
+   (buffer-string)))
 
 (cl-defun agent-shell-markdown-replace-markup (&key force
                                                     (render-images t)
@@ -700,6 +702,35 @@ face `agent-shell-markdown-inline-code' on \"code\"."
                 (put-text-property markup-start end
                                    'agent-shell-markdown-source source)))))))))
 
+(defun agent-shell-markdown--link-markup-regexp (imagep)
+  "Return a regexp matching link (or image, when IMAGEP) markup.
+
+The destination accepts both the bare `(url)' form and the
+CommonMark angle-bracketed `(<url>)' form, the latter allowing the
+URL to contain spaces (e.g. `(</path/with spaces.png>)').
+
+Capture groups: group 1 is the label (link title or image alt);
+group 2 is the angle-bracketed destination body; group 3 is the
+bare destination body.  Exactly one of groups 2 and 3 participates
+in any match — read the URL from whichever did."
+  (rx-to-string
+   `(seq ,@(when imagep '("!"))
+         "["
+         (group (,(if imagep 'zero-or-more 'one-or-more) (not (any "]"))))
+         "]"
+         "("
+         (or (seq "<" (group (zero-or-more (not (any "<" ">" "\n")))) ">")
+             (group (one-or-more (not (any ")")))))
+         ")")
+   t))
+
+(defun agent-shell-markdown--link-markup-url ()
+  "Return the URL from the last `agent-shell-markdown--link-markup-regexp' match.
+Reads capture group 2 (angle-bracketed form) when it participated,
+otherwise group 3 (bare form)."
+  (let ((group (if (match-beginning 2) 2 3)))
+    (buffer-substring-no-properties (match-beginning group) (match-end group))))
+
 (cl-defun agent-shell-markdown--replace-links (&key avoid-ranges)
   "Replace `[title](url)' markup with title faced as link.
 
@@ -709,19 +740,17 @@ opens the URL on RET or mouse-1.  Matches preceded by `!' (the
 image syntax) are skipped, as are links inside any of
 AVOID-RANGES.
 
+A bare `(url)' destination and the CommonMark angle-bracketed
+`(<url>)' form are both accepted; the latter allows spaces in the
+URL (see `agent-shell-markdown--link-markup-regexp').
+
 For example, the buffer \"see [docs](https://example.com)\"
 becomes \"see docs\" with face `agent-shell-markdown-link' on \"docs\"
 and a keymap that opens the URL."
-  (let ((case-fold-search nil))
+  (let ((case-fold-search nil)
+        (regexp (agent-shell-markdown--link-markup-regexp nil)))
     (goto-char (point-min))
-    (while (re-search-forward
-            (rx "["
-                (group (one-or-more (not (any "]"))))
-                "]"
-                "("
-                (group (one-or-more (not (any ")"))))
-                ")")
-            nil t)
+    (while (re-search-forward regexp nil t)
       (let* ((markup-start (match-beginning 0))
              (markup-end (match-end 0))
              (is-image (eq (char-before markup-start) ?!))
@@ -733,8 +762,7 @@ and a keymap that opens the URL."
          (is-image nil)
          (t
           (let ((title (buffer-substring (match-beginning 1) (match-end 1)))
-                (url (buffer-substring-no-properties
-                      (match-beginning 2) (match-end 2)))
+                (url (agent-shell-markdown--link-markup-url))
                 (source (unless (get-text-property markup-start
                                                    'agent-shell-markdown-source)
                           (agent-shell-markdown-reconstruct
@@ -776,19 +804,16 @@ faced as `agent-shell-markdown-link' with a keymap that opens the
 URL on RET or mouse-1.  Any other unresolvable markup is left
 untouched.  Images inside any of AVOID-RANGES are left alone.
 
+A bare `(url)' destination and the CommonMark angle-bracketed
+`(<url>)' form are both accepted; the latter allows spaces in the
+URL (see `agent-shell-markdown--link-markup-regexp').
+
 For example, the buffer \"see ![logo](logo.png)\" becomes
 \"see logo\" with the image shown in place of \"logo\"."
-  (let ((case-fold-search nil))
+  (let ((case-fold-search nil)
+        (regexp (agent-shell-markdown--link-markup-regexp t)))
     (goto-char (point-min))
-    (while (re-search-forward
-            (rx "!"
-                "["
-                (group (zero-or-more (not (any "]"))))
-                "]"
-                "("
-                (group (one-or-more (not (any ")"))))
-                ")")
-            nil t)
+    (while (re-search-forward regexp nil t)
       (let* ((markup-start (match-beginning 0))
              (markup-end (match-end 0))
              (avoid (agent-shell-markdown-in-avoid-range-p
@@ -814,8 +839,7 @@ For example, the buffer \"see ![logo](logo.png)\" becomes
                                          (text-properties-at markup-start))
                                 (buffer-substring (match-beginning 1)
                                                   (match-end 1))))
-                 (url (buffer-substring-no-properties
-                       (match-beginning 2) (match-end 2)))
+                 (url (agent-shell-markdown--link-markup-url))
                  ;; Stash the original `![alt](url)' markup so
                  ;; `agent-shell-copy-as-markdown' round-trips the image back to
                  ;; source rather than yielding the bare alt placeholder (mirrors
@@ -915,7 +939,7 @@ renders the image in place of that text."
                 (put-text-property path-start path-end 'mouse-face 'highlight)
                 (add-text-properties path-start path-end
                                      '(agent-shell-markdown-frozen t
-                                       rear-nonsticky (agent-shell-markdown-frozen))))))))))))
+                                                                   rear-nonsticky (agent-shell-markdown-frozen))))))))))))
 
 (cl-defun agent-shell-markdown--style-dividers (&key avoid-ranges)
   "Render `---' / `***' / `___' horizontal-rule lines as styled rules.
@@ -998,7 +1022,7 @@ left untouched."
                                   'agent-shell-markdown-blockquote)
           (add-text-properties line-start line-end
                                '(agent-shell-markdown-frozen t
-                                 rear-nonsticky (agent-shell-markdown-frozen))))))))
+                                                             rear-nonsticky (agent-shell-markdown-frozen))))))))
 
 (defun agent-shell-markdown--display-width ()
   "Return a usable display width for divider rendering.
@@ -2149,64 +2173,64 @@ CJK) so right borders align across rows.  Without it,
 measurement falls back to `string-width' — fine for ASCII but
 prone to a few-pixel drift on emoji-heavy tables."
   (agent-shell-with-work-buffer
-    (insert source)
-    ;; SOURCE inherits `field' text properties from the calling buffer
-    ;; (e.g. agent-shell tags chars with `field output'); inter-row
-    ;; `\\n's may carry different field values, which would otherwise
-    ;; cause `forward-line' / `line-end-position' in the parsers below
-    ;; to stop at field boundaries and silently drop rows.
-    (setq-local inhibit-field-text-motion t)
-    (let* ((rows (agent-shell-markdown--collect-table-rows))
-           (separator-row-num (agent-shell-markdown--find-separator-row-num rows))
-           (preprocessed (agent-shell-markdown--preprocess-table
-                          :rows rows :window window))
-           (natural-widths (map-elt preprocessed :natural-widths))
-           (processed-rows (map-elt preprocessed :processed-rows))
-           (target-width (when agent-shell-markdown-table-wrap-columns
-                           (floor (* (agent-shell-markdown--display-width)
-                                     agent-shell-markdown-table-max-width-fraction))))
-           (needs-allocation (and target-width
-                                  (> (agent-shell-markdown--table-total-width
-                                      natural-widths)
-                                     target-width)))
-           ;; `:min-widths' is expensive (longest-word per cell) and only
-           ;; consumed by allocation, which kicks in only when the
-           ;; natural total exceeds the target.  Compute lazily.
-           (col-widths (if needs-allocation
-                           (agent-shell-markdown--table-allocate-widths
-                            natural-widths
-                            (agent-shell-markdown--table-min-widths
-                             :processed-rows processed-rows
-                             :window window)
-                            target-width)
-                         natural-widths))
-           (data-row-num 0)
-           (rendered-rows '()))
-      (dolist (entry processed-rows)
-        (let* ((row (car entry))
-               (processed-cells (cdr entry))
-               (row-num (map-elt row :num))
-               (is-separator (map-elt row :separator))
-               (is-header (and separator-row-num
-                               (< row-num separator-row-num)))
-               (is-zebra (and agent-shell-markdown-table-zebra-stripe
-                              (not is-header)
-                              (not is-separator)
-                              (= (mod data-row-num 2) 1)))
-               (row-face (cond
-                          (is-header 'agent-shell-markdown-table-header)
-                          (is-zebra 'agent-shell-markdown-table-zebra))))
-          (unless (or is-header is-separator)
-            (setq data-row-num (1+ data-row-num)))
-          (push (if is-separator
-                    (agent-shell-markdown--render-table-separator-row col-widths)
-                  (agent-shell-markdown--render-table-data-row
-                   :processed-cells processed-cells
-                   :col-widths col-widths
-                   :row-face row-face
-                   :window window))
-                rendered-rows)))
-      (string-join (nreverse rendered-rows) "\n"))))
+   (insert source)
+   ;; SOURCE inherits `field' text properties from the calling buffer
+   ;; (e.g. agent-shell tags chars with `field output'); inter-row
+   ;; `\\n's may carry different field values, which would otherwise
+   ;; cause `forward-line' / `line-end-position' in the parsers below
+   ;; to stop at field boundaries and silently drop rows.
+   (setq-local inhibit-field-text-motion t)
+   (let* ((rows (agent-shell-markdown--collect-table-rows))
+          (separator-row-num (agent-shell-markdown--find-separator-row-num rows))
+          (preprocessed (agent-shell-markdown--preprocess-table
+                         :rows rows :window window))
+          (natural-widths (map-elt preprocessed :natural-widths))
+          (processed-rows (map-elt preprocessed :processed-rows))
+          (target-width (when agent-shell-markdown-table-wrap-columns
+                          (floor (* (agent-shell-markdown--display-width)
+                                    agent-shell-markdown-table-max-width-fraction))))
+          (needs-allocation (and target-width
+                                 (> (agent-shell-markdown--table-total-width
+                                     natural-widths)
+                                    target-width)))
+          ;; `:min-widths' is expensive (longest-word per cell) and only
+          ;; consumed by allocation, which kicks in only when the
+          ;; natural total exceeds the target.  Compute lazily.
+          (col-widths (if needs-allocation
+                          (agent-shell-markdown--table-allocate-widths
+                           natural-widths
+                           (agent-shell-markdown--table-min-widths
+                            :processed-rows processed-rows
+                            :window window)
+                           target-width)
+                        natural-widths))
+          (data-row-num 0)
+          (rendered-rows '()))
+     (dolist (entry processed-rows)
+       (let* ((row (car entry))
+              (processed-cells (cdr entry))
+              (row-num (map-elt row :num))
+              (is-separator (map-elt row :separator))
+              (is-header (and separator-row-num
+                              (< row-num separator-row-num)))
+              (is-zebra (and agent-shell-markdown-table-zebra-stripe
+                             (not is-header)
+                             (not is-separator)
+                             (= (mod data-row-num 2) 1)))
+              (row-face (cond
+                         (is-header 'agent-shell-markdown-table-header)
+                         (is-zebra 'agent-shell-markdown-table-zebra))))
+         (unless (or is-header is-separator)
+           (setq data-row-num (1+ data-row-num)))
+         (push (if is-separator
+                   (agent-shell-markdown--render-table-separator-row col-widths)
+                 (agent-shell-markdown--render-table-data-row
+                  :processed-cells processed-cells
+                  :col-widths col-widths
+                  :row-face row-face
+                  :window window))
+               rendered-rows)))
+     (string-join (nreverse rendered-rows) "\n"))))
 
 (defun agent-shell-markdown--collect-table-rows ()
   "Collect table rows in current buffer (typically a temp buffer).
