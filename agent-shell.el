@@ -3434,6 +3434,19 @@ variable (see makunbound)"))
       (error "Editing the wrong buffer: %s" (current-buffer)))
     (agent-shell-ui-delete-fragment :namespace-id (map-elt state :request-count) :block-id block-id :no-undo t)))
 
+(defun agent-shell--live-input-prompt-p (prompt)
+  "Non-nil when PROMPT is a live input prompt at the end of the buffer.
+PROMPT is a `comint-last-prompt' cons of (start . end) markers.  It's
+live when nothing follows it (empty input area) or when everything
+between its end and `point-max' is user input rather than agent output.
+This tells a real prompt awaiting input, possibly with unsubmitted typed
+text, apart from a stale prompt left mid-buffer while output streams
+below it (where `comint-last-prompt' still points at the previous
+prompt).  Output carries a `field' of `output'; typed input does not."
+  (let ((end (marker-position (cdr prompt))))
+    (or (= end (point-max))
+        (not (text-property-any end (point-max) 'field 'output)))))
+
 (cl-defun agent-shell--update-fragment (&key state namespace-id block-id label-left label-right
                                              body append create-new navigation expanded
                                              render-body-images above-last-prompt)
@@ -3538,13 +3551,14 @@ turn)."
            ;; `end_turn').  Narrow above the prompt so the fragment
            ;; system inserts there, and flip the prompt-start marker's
            ;; insertion-type so it advances past the new text rather
-           ;; than ending up stranded inside it.  Falls back to the
-           ;; normal in-line path when no prompt sits at `point-max'.
+           ;; than ending up stranded inside it.  Anchor on the
+           ;; prompt-start so unsubmitted typed input is pushed down with
+           ;; the prompt.  Falls back to the normal in-line path when no
+           ;; live input prompt sits at the buffer end.
            (late-prompt-start (and above-last-prompt
                                    comint-last-prompt
                                    (marker-position (car comint-last-prompt))
-                                   (= (marker-position (cdr comint-last-prompt))
-                                      (point-max))
+                                   (agent-shell--live-input-prompt-p comint-last-prompt)
                                    (car comint-last-prompt)))
            (orig-insertion-type (and late-prompt-start
                                      (marker-insertion-type late-prompt-start))))
