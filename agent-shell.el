@@ -1906,6 +1906,11 @@ pretty-printed JSON inside a json fence."
               :file-path agent-shell--transcript-file)
              (agent-shell--update-fragment
               :state state
+              ;; Out of turn, key under a dedicated namespace so the
+              ;; message forms its own fragment rather than coalescing
+              ;; into the previous turn's final message, which shares the
+              ;; (unchanged) request-count and group-count.
+              :namespace-id (unless (agent-shell--active-requests-p state) "out-of-turn")
               :block-id (format "%s-agent_message_chunk"
                                 (map-elt state :chunked-group-count))
               :body content
