@@ -604,6 +604,28 @@ block -- covering the dispatch path, not just the helper in isolation."
                                       (uri . "file:///tmp/x.png"))))))
       (should (equal rendered "\n\n![image](file:///tmp/x.png)\n\n")))))
 
+(ert-deftest agent-shell--on-notification-session-info-update-test ()
+  "Test `session_info_update' updates the session title.
+
+Drives an ACP `session/update' notification through
+`agent-shell--on-notification' and asserts the title from the update
+is handed to `agent-shell--set-session-title'."
+  (with-temp-buffer
+    (let ((state (list (cons :buffer (current-buffer))
+                       (cons :last-entry-type nil)
+                       (cons :last-activity-time nil)))
+          (title nil))
+      (cl-letf (((symbol-function 'agent-shell--set-session-title)
+                 (lambda (new-title) (setq title new-title))))
+        (agent-shell--on-notification
+         :state state
+         :acp-notification '((method . "session/update")
+                             (params
+                              (update
+                               (sessionUpdate . "session_info_update")
+                               (title . "Render Tool Updates")))))
+        (should (equal title "Render Tool Updates"))))))
+
 (ert-deftest agent-shell--collect-attached-files-test ()
   "Test agent-shell--collect-attached-files function."
   ;; Test with empty list

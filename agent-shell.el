@@ -2208,6 +2208,12 @@ pretty-printed JSON inside a json fence."
                        (agent-shell--get-available-modes state)))
              ;; Note: No need to set :last-entry-type as no text was inserted.
              (agent-shell--update-header-and-mode-line)))
+          ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "session_info_update")
+           (with-current-buffer (map-elt state :buffer)
+             (agent-shell--set-session-title
+              (map-nested-elt acp-notification '(params update title))))
+           ;; Note: No need to set :last-entry-type as no text was inserted.
+           nil)
           ((equal (map-nested-elt acp-notification '(params update sessionUpdate)) "config_option_update")
            (agent-shell--save-config-options
             :state state
