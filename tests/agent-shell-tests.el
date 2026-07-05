@@ -3216,6 +3216,19 @@ Based on ACP traffic from https://github.com/xenodium/agent-shell/issues/415."
               (:raw-input . ((filepath . "/home/user/src/s3notifications.rs")))
               (:kind . "read"))))))
 
+(ert-deftest agent-shell--permission-title-non-string-path-test ()
+  "Test `agent-shell--permission-title' ignores a non-string `path'.
+Some tools use `path' for a non-filesystem value (e.g. an HTTP
+API's path params), so it must not be fed to `file-name-nondirectory'."
+  (should (equal
+           "some_tool"
+           (agent-shell--permission-title
+            :tool-call
+            '((:title . "some_tool")
+              (:raw-input . ((path . ((id . "abc")))
+                             (body . ((value . 1)))))
+              (:kind . "other"))))))
+
 (ert-deftest agent-shell--permission-title-execute-fenced-test ()
   "Test `agent-shell--permission-title' fences execute commands."
   (should (equal

@@ -6761,10 +6761,14 @@ For example:
          (raw-input (map-elt tool-call :raw-input))
          (command (agent-shell--tool-call-command-to-string
                    (map-elt raw-input 'command)))
-         (filepath (or (map-elt raw-input 'filepath)
-                       (map-elt raw-input 'fileName)
-                       (map-elt raw-input 'path)
-                       (map-elt raw-input 'file_path)))
+         ;; Some tools put a non-string under `path' (e.g. an HTTP API's
+         ;; path params), so pick the first string, like the `locations'
+         ;; paths guard below.
+         (filepath (seq-find #'stringp
+                             (list (map-elt raw-input 'filepath)
+                                   (map-elt raw-input 'fileName)
+                                   (map-elt raw-input 'path)
+                                   (map-elt raw-input 'file_path))))
          (content-texts
           (delq nil
                 (mapcar (lambda (item)
