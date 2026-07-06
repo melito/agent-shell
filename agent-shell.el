@@ -3604,8 +3604,8 @@ turn)."
   (when label-right
     (setq label-right (string-trim label-right)))
   ;; Convert non-standard multiline single-backtick code spans to fenced
-  ;; code blocks so markdown-overlays can recognize them as source blocks,
-  ;; but only for labels that start with `.
+  ;; code blocks so the markdown renderer can recognize them as source
+  ;; blocks, but only for labels that start with `.
   (when (and label-right
              (not (string-match-p (rx "```") label-right))
              (string-match-p
@@ -6883,7 +6883,7 @@ For example:
       (setq text (if text
                      (concat (string-trim-right text) " (" filename ")")
                    filename)))
-    ;; Fence execute commands so markdown-overlays
+    ;; Fence execute commands so the markdown renderer
     ;; renders them verbatim, not as markdown.
     (when (and text
                (equal text command)
