@@ -4726,10 +4726,11 @@ SUBSCRIPTION is a token returned by `agent-shell-subscribe-to'."
 No-op unless `agent-shell-inhibit-system-sleep' is non-nil and the
 `system-sleep' library (Emacs 31.1+) is available.  The block is
 recorded in STATE and released by `agent-shell--uninhibit-sleep'."
+  (unless (fboundp 'system-sleep-block-sleep)
+    (require 'system-sleep nil t))
   ;; Block system idle sleep but allow the display to blank.
   (when-let* ((agent-shell-inhibit-system-sleep)
               ((not (map-elt state :sleep-token)))
-              ((require 'system-sleep nil t))
               ((fboundp 'system-sleep-block-sleep))
               (token (system-sleep-block-sleep "agent-shell (agent busy)" t)))
     (map-put! state :sleep-token token)))
@@ -4749,7 +4750,10 @@ permission response), since that is waiting on user input rather than
 work in progress."
   (when-let* ((buffer (map-elt state :buffer))
               ((buffer-live-p buffer)))
-    (if (eq (agent-shell-status :shell-buffer buffer) 'busy)
+    ;; `agent-shell-status' errors when BUFFER is not a live shell (e.g. a
+    ;; killed buffer during teardown).  Treat that as no work in progress
+    ;; and release rather than propagating out of event dispatch.
+    (if (eq (ignore-errors (agent-shell-status :shell-buffer buffer)) 'busy)
         (agent-shell--inhibit-sleep state)
       (agent-shell--uninhibit-sleep state))))
 
