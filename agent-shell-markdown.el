@@ -58,7 +58,7 @@
 
 (eval-when-compile
   (require 'cl-lib))
-(require 'compat)
+(require 'agent-shell-work-buffer)
 (require 'map)
 (require 'seq)
 (require 'org-faces)
@@ -254,7 +254,7 @@ For example:
 
   (agent-shell-markdown-convert \"_my_ **text**\")
   => #(\"my text\" 0 2 (face italic) 3 7 (face bold))"
-  (with-work-buffer
+  (agent-shell-with-work-buffer
     (insert markdown)
     (agent-shell-markdown-replace-markup)
     (buffer-string)))
@@ -2042,7 +2042,7 @@ accurate width measurement of non-ASCII cell content (emoji,
 CJK) so right borders align across rows.  Without it,
 measurement falls back to `string-width' — fine for ASCII but
 prone to a few-pixel drift on emoji-heavy tables."
-  (with-work-buffer
+  (agent-shell-with-work-buffer
     (insert source)
     ;; SOURCE inherits `field' text properties from the calling buffer
     ;; (e.g. agent-shell tags chars with `field output'); inter-row

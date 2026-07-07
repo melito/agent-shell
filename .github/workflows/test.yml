@@ -22,7 +22,6 @@ jobs:
         run: |
           git clone --depth 1 https://github.com/xenodium/acp.el ../acp
           git clone --depth 1 https://github.com/xenodium/shell-maker ../shell-maker
-          git clone --depth 1 https://github.com/emacs-compat/compat ../compat
 
       - name: Run tests
         env:

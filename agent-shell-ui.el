@@ -32,7 +32,7 @@
 ;;; Code:
 
 (require 'cl-lib)
-(require 'compat)
+(require 'agent-shell-work-buffer)
 (require 'map)
 (require 'cursor-sensor)
 (require 'subr-x)
@@ -645,7 +645,7 @@ When NO-UNDO is non-nil, disable undo recording."
                    (let ((end (point)))
                      (forward-line (- (+ 1 desired)))
                      (buffer-substring (point) end)))))
-    (with-work-buffer
+    (agent-shell-with-work-buffer
       (insert context)
       ;; When counting visible newlines before point,
       ;; we may encounter invisible text, which may
