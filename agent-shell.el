@@ -4,10 +4,10 @@
 
 ;; Author: Alvaro Ramirez https://xenodium.com
 ;; URL: https://github.com/xenodium/agent-shell
-;; Version: 0.57.3
+;; Version: 0.58.1
 ;; Package-Requires: ((emacs "29.1") (shell-maker "0.93.3") (acp "0.12.2"))
 
-(defconst agent-shell--version "0.57.3")
+(defconst agent-shell--version "0.58.1")
 
 ;; This package is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
