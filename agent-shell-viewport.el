@@ -307,7 +307,10 @@ Optionally set its PROMPT and RESPONSE."
     (when prompt
       (insert
        (if (derived-mode-p 'agent-shell-viewport-view-mode)
-           (propertize (concat prompt "\n\n")
+           ;; No need to append trailing "\n\n" to split
+           ;; prompt from response as the raw prompt already
+           ;; carries its own trailing newline.
+           (propertize prompt
                        'rear-nonsticky t
                        'agent-shell-viewport-prompt t
                        'face 'agent-shell-viewport-prompt)
