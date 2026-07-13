@@ -19,7 +19,23 @@ Thank you!
 
 A native Emacs shell to interact with LLM agents powered by ACP ([[https://agentclientprotocol.com][Agent Client Protocol]]).
 
-With agent-shell, you can chat with the likes of Gemini CLI, Claude Agent, Auggie, Mistral Vibe, or any other ACP-driven agent.
+With agent-shell, you can interact with any ACP-driven agent like:
+
+- [[https://code.claude.com/docs/en/overview][Claude Agent]] (Anthropic)
+- [[https://github.com/agentclientprotocol/codex-acp][Codex]] (OpenAI)
+- [[https://github.com/google-gemini/gemini-cli][Gemini CLI]] (Google)
+- [[https://goose-docs.ai/docs/getting-started/installation][Goose]]
+- [[https://cursor.com/docs/cli][Cursor]]
+- [[https://www.kimi.com/code][Kimi Code CLI]]
+- [[https://www.codebuddy.ai][CodeBuddy]]
+- [[https://kiro.dev][Kiro CLI]]
+- [[https://github.com/QwenLM/qwen-code][Qwen Code]]
+- [[https://docs.augmentcode.com/cli/overview][Auggie]]
+- [[https://github.com/mistralai/mistral-vibe][Mistral Vibe]]
+- [[https://factory.ai][Factory Droid]]
+- [[https://github.com/svkozak/pi-acp][Pi]]
+- [[https://github.com/can1357/oh-my-pi][Oh My Pi]]
+- [[https://opencode.ai][Opencode]]
 
 [[https://www.youtube.com/watch?v=R2Ucr3amgGg][agent-shell - YouTube]]
 
