@@ -137,24 +137,25 @@ hunk's line numbers do not match the file.  The jump must locate the
 change by content."
   (let* ((body (mapconcat (lambda (n) (format "line %d" n))
                           (number-sequence 1 30) "\n"))
-         (file (make-temp-file "agent-shell-jump" nil ".txt" (concat body "\n")))
-         ;; Fragment around line 21; its diff hunk is fragment-relative.
-         (buf (agent-shell-diff
-               :diffs (list (list (cons :old "line 20\nline 21\nline 22")
-                                  (cons :new "line 20\nline 21 CHANGED\nline 22")
-                                  (cons :file file))))))
+         (file (make-temp-file "agent-shell-jump" nil ".txt" (concat body "\n"))))
     (unwind-protect
-        (with-current-buffer buf
-          (goto-char (point-min))
-          (search-forward "-line 21")
-          (beginning-of-line)
-          (agent-shell-diff-open-file)
-          ;; find-file switched the current buffer to the visited file.
-          (should (equal (buffer-substring-no-properties
-                          (line-beginning-position) (line-end-position))
-                         "line 21")))
-      (when (buffer-live-p buf) (kill-buffer buf))
-      (when (get-file-buffer file) (kill-buffer (get-file-buffer file)))
+        ;; Fragment around line 21; its diff hunk is fragment-relative.
+        (let ((buf (agent-shell-diff
+                    :diffs (list (list (cons :old "line 20\nline 21\nline 22")
+                                       (cons :new "line 20\nline 21 CHANGED\nline 22")
+                                       (cons :file file))))))
+          (unwind-protect
+              (with-current-buffer buf
+                (goto-char (point-min))
+                (search-forward "-line 21")
+                (beginning-of-line)
+                (agent-shell-diff-open-file)
+                ;; find-file switched the current buffer to the visited file.
+                (should (equal (buffer-substring-no-properties
+                                (line-beginning-position) (line-end-position))
+                               "line 21")))
+            (when (buffer-live-p buf) (kill-buffer buf))
+            (when (get-file-buffer file) (kill-buffer (get-file-buffer file)))))
       (delete-file file))))
 
 (ert-deftest agent-shell-diff-open-file-falls-back-to-new-side-test ()
@@ -165,22 +166,23 @@ in the file (the addition sits in the middle of it), so the jump must
 fall back to searching the new-side text.  Mirrors the real Claude Code
 `* Welcome' prepend in welcome.traffic."
   (let* ((file (make-temp-file "agent-shell-jump" nil ".txt"
-                               "alpha\nADDED\nbeta\n"))
-         (buf (agent-shell-diff
-               :diffs (list (list (cons :old "alpha\nbeta")
-                                  (cons :new "alpha\nADDED\nbeta")
-                                  (cons :file file))))))
+                               "alpha\nADDED\nbeta\n")))
     (unwind-protect
-        (with-current-buffer buf
-          (goto-char (point-min))
-          (search-forward "+ADDED")
-          (beginning-of-line)
-          (agent-shell-diff-open-file)
-          (should (equal (buffer-substring-no-properties
-                          (line-beginning-position) (line-end-position))
-                         "ADDED")))
-      (when (buffer-live-p buf) (kill-buffer buf))
-      (when (get-file-buffer file) (kill-buffer (get-file-buffer file)))
+        (let ((buf (agent-shell-diff
+                    :diffs (list (list (cons :old "alpha\nbeta")
+                                       (cons :new "alpha\nADDED\nbeta")
+                                       (cons :file file))))))
+          (unwind-protect
+              (with-current-buffer buf
+                (goto-char (point-min))
+                (search-forward "+ADDED")
+                (beginning-of-line)
+                (agent-shell-diff-open-file)
+                (should (equal (buffer-substring-no-properties
+                                (line-beginning-position) (line-end-position))
+                               "ADDED")))
+            (when (buffer-live-p buf) (kill-buffer buf))
+            (when (get-file-buffer file) (kill-buffer (get-file-buffer file)))))
       (delete-file file))))
 
 (ert-deftest agent-shell-diff-open-file-disambiguates-with-hint-test ()
@@ -190,23 +192,24 @@ The changed content appears twice in the file, so a plain search would
 land on the first.  The hint line steers it to the intended occurrence."
   (let* ((file (make-temp-file "agent-shell-jump" nil ".txt"
                                (concat "context\ntarget\nfiller\n"
-                                       "context\ntarget\nfiller\n")))
-         ;; :line 4 points at the second occurrence.
-         (buf (agent-shell-diff
-               :diffs (list (list (cons :old "context\ntarget")
-                                  (cons :new "context\ntarget CHANGED")
-                                  (cons :file file)
-                                  (cons :line 4))))))
+                                       "context\ntarget\nfiller\n"))))
     (unwind-protect
-        (with-current-buffer buf
-          (goto-char (point-min))
-          (search-forward "-target")
-          (beginning-of-line)
-          (agent-shell-diff-open-file)
-          ;; Second "target" is at line 5, not the first at line 2.
-          (should (equal (line-number-at-pos) 5)))
-      (when (buffer-live-p buf) (kill-buffer buf))
-      (when (get-file-buffer file) (kill-buffer (get-file-buffer file)))
+        ;; :line 4 points at the second occurrence.
+        (let ((buf (agent-shell-diff
+                    :diffs (list (list (cons :old "context\ntarget")
+                                       (cons :new "context\ntarget CHANGED")
+                                       (cons :file file)
+                                       (cons :line 4))))))
+          (unwind-protect
+              (with-current-buffer buf
+                (goto-char (point-min))
+                (search-forward "-target")
+                (beginning-of-line)
+                (agent-shell-diff-open-file)
+                ;; Second "target" is at line 5, not the first at line 2.
+                (should (equal (line-number-at-pos) 5)))
+            (when (buffer-live-p buf) (kill-buffer buf))
+            (when (get-file-buffer file) (kill-buffer (get-file-buffer file)))))
       (delete-file file))))
 
 (ert-deftest agent-shell-diff-on-exit-skipped-when-calling-buffer-dead-test ()
