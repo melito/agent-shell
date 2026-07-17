@@ -1,9 +1,6 @@
 ;;; agent-shell-xai.el --- xAI Grok Build agent configurations -*- lexical-binding: t; -*-
 
-;; Copyright (C) 2024 Alvaro Ramirez
-
-;; Author: Alvaro Ramirez https://xenodium.com
-;; URL: https://github.com/xenodium/agent-shell
+;; Copyright (C) 2026 Eddie Jesinsky
 
 ;; This package is free software; you can redistribute it and/or modify
 ;; it under the terms of the GNU General Public License as published by
