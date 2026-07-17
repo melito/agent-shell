@@ -4117,27 +4117,47 @@ with \"Method not found\"."
         (agent-shell--refresh-session-title)
         (should (equal sent-method "session/list"))))))
 
-;;; Tests for agent-shell--tool-call-group-id
+;;; Tests for agent-shell--activity-group-id
 
-(ert-deftest agent-shell--tool-call-group-id-groups-consecutive-runs-test ()
+(ert-deftest agent-shell--activity-group-id-groups-consecutive-runs-test ()
   "Consecutive tool calls share a group; an interruption starts a new one.
 A tool's group is assigned once and reused, so a later update keeps it even
 if a message streamed in between."
   (let ((state (list (cons :last-entry-type nil)
-                     (cons :tool-call-group-count 0)
+                     (cons :activity-group-count 0)
                      (cons :tool-calls nil))))
     ;; First tool call after a non-tool entry -> group 1.
-    (should (equal "tool-calls-1" (agent-shell--tool-call-group-id state "a")))
+    (should (equal "activity-1" (agent-shell--activity-group-id state "a")))
     (map-put! state :last-entry-type "tool_call")
     ;; A second consecutive tool call joins the same group.
-    (should (equal "tool-calls-1" (agent-shell--tool-call-group-id state "b")))
+    (should (equal "activity-1" (agent-shell--activity-group-id state "b")))
     (map-put! state :last-entry-type "tool_call_update")
     ;; A message interrupts the run...
     (map-put! state :last-entry-type "agent_message_chunk")
     ;; ...but an update to an existing tool reuses its stored group.
-    (should (equal "tool-calls-1" (agent-shell--tool-call-group-id state "a")))
+    (should (equal "activity-1" (agent-shell--activity-group-id state "a")))
     ;; A brand-new tool after the message starts a fresh group.
-    (should (equal "tool-calls-2" (agent-shell--tool-call-group-id state "c")))))
+    (should (equal "activity-2" (agent-shell--activity-group-id state "c")))))
+
+(ert-deftest agent-shell--activity-group-current-id-shares-run-with-thoughts-test ()
+  "Thoughts and tool calls share one activity run; a message breaks it.
+A thought between tool calls keeps the group open (it is part of the same
+agent activity), while an `agent_message_chunk' starts a fresh group."
+  (let ((state (list (cons :last-entry-type nil)
+                     (cons :activity-group-count 0))))
+    ;; First entry of a run -> group 1.
+    (should (equal "activity-1" (agent-shell--activity-group-current-id state)))
+    ;; A thought after a tool call stays in the same group.
+    (map-put! state :last-entry-type "tool_call")
+    (should (equal "activity-1" (agent-shell--activity-group-current-id state)))
+    ;; Streamed thought chunks keep the same group.
+    (map-put! state :last-entry-type "agent_thought_chunk")
+    (should (equal "activity-1" (agent-shell--activity-group-current-id state)))
+    ;; A tool call after a thought still shares the group.
+    (should (equal "activity-1" (agent-shell--activity-group-current-id state)))
+    ;; A message breaks the run -> fresh group.
+    (map-put! state :last-entry-type "agent_message_chunk")
+    (should (equal "activity-2" (agent-shell--activity-group-current-id state)))))
 
 (ert-deftest agent-shell--tool-call-grouping-late-update-starts-new-group-test ()
   "A message between a tool call and the next starts a fresh group.
@@ -4149,13 +4169,13 @@ dispatch, since the defect is in the `tool_call_update' handler, not the
 group-id helper alone."
   (let ((state (list (cons :tool-calls nil)
                      (cons :last-entry-type nil)
-                     (cons :tool-call-group-count 0)
+                     (cons :activity-group-count 0)
                      (cons :chunked-group-count 0)
                      (cons :active-requests t)
                      (cons :last-activity-time nil)
                      (cons :buffer nil))))
     (cl-letf (((symbol-function 'agent-shell--update-fragment) #'ignore)
-              ((symbol-function 'agent-shell--refresh-tool-call-group-header) #'ignore)
+              ((symbol-function 'agent-shell--refresh-activity-group-header) #'ignore)
               ((symbol-function 'agent-shell--append-transcript) #'ignore)
               ((symbol-function 'agent-shell--make-transcript-tool-call-entry)
                (lambda (&rest _) ""))
@@ -4180,8 +4200,8 @@ group-id helper alone."
         (notify '((sessionUpdate . "tool_call") (toolCallId . "B")
                   (title . "B") (kind . "other") (status . "pending"))))
       ;; B must land in a fresh group, not A's.
-      (should (equal "tool-calls-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
-      (should (equal "tool-calls-2" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
+      (should (equal "activity-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
+      (should (equal "activity-2" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
 
 (ert-deftest agent-shell--tool-call-grouping-consecutive-share-group-test ()
   "Consecutive tool calls (no interleaving entry) share one group.
@@ -4189,13 +4209,13 @@ Guards that the #31 fix does not over-split: an in-place completion update
 between two tool calls keeps them together."
   (let ((state (list (cons :tool-calls nil)
                      (cons :last-entry-type nil)
-                     (cons :tool-call-group-count 0)
+                     (cons :activity-group-count 0)
                      (cons :chunked-group-count 0)
                      (cons :active-requests t)
                      (cons :last-activity-time nil)
                      (cons :buffer nil))))
     (cl-letf (((symbol-function 'agent-shell--update-fragment) #'ignore)
-              ((symbol-function 'agent-shell--refresh-tool-call-group-header) #'ignore)
+              ((symbol-function 'agent-shell--refresh-activity-group-header) #'ignore)
               ((symbol-function 'agent-shell--append-transcript) #'ignore)
               ((symbol-function 'agent-shell--make-transcript-tool-call-entry)
                (lambda (&rest _) ""))
@@ -4217,8 +4237,8 @@ between two tool calls keeps them together."
                                (content (type . "text") (text . "done")))])))
         (notify '((sessionUpdate . "tool_call") (toolCallId . "B")
                   (title . "B") (kind . "other") (status . "pending"))))
-      (should (equal "tool-calls-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
-      (should (equal "tool-calls-1" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
+      (should (equal "activity-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
+      (should (equal "activity-1" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
 
 (ert-deftest agent-shell--tool-call-grouping-permission-keeps-group-test ()
   "A tool call that required a permission prompt stays grouped with the next.
@@ -4229,14 +4249,14 @@ completion) and renders no lasting interleaved content."
   (let* ((buffer (generate-new-buffer " *permission-group-test*"))
          (state (list (cons :tool-calls nil)
                       (cons :last-entry-type nil)
-                      (cons :tool-call-group-count 0)
+                      (cons :activity-group-count 0)
                       (cons :chunked-group-count 0)
                       (cons :active-requests t)
                       (cons :last-activity-time nil)
                       (cons :buffer buffer))))
     (unwind-protect
     (cl-letf (((symbol-function 'agent-shell--update-fragment) #'ignore)
-              ((symbol-function 'agent-shell--refresh-tool-call-group-header) #'ignore)
+              ((symbol-function 'agent-shell--refresh-activity-group-header) #'ignore)
               ((symbol-function 'agent-shell--append-transcript) #'ignore)
               ((symbol-function 'agent-shell--make-transcript-tool-call-entry)
                (lambda (&rest _) ""))
@@ -4294,6 +4314,43 @@ and the completed/total count lets a non-completed member lift the total only."
     (should (string-suffix-p "Tool calls 2/5"
                              (label '("completed" "completed" "in_progress"
                                       "pending" "in_progress"))))))
+
+(ert-deftest agent-shell--tool-call-kind-phrase-test ()
+  "Verbs conjugate by tense, nouns by count, unknown kinds fall back."
+  (should (equal "ran 2 commands"
+                 (agent-shell--tool-call-kind-phrase :kind "execute" :count 2)))
+  (should (equal "run a command"
+                 (agent-shell--tool-call-kind-phrase :kind "execute" :count 1 :pending t)))
+  (should (equal "read a file"
+                 (agent-shell--tool-call-kind-phrase :kind "read" :count 1)))
+  ;; Unknown kinds fall back to the generic phrasing.
+  (should (equal "ran 3 tool calls"
+                 (agent-shell--tool-call-kind-phrase :kind "mystery" :count 3))))
+
+(ert-deftest agent-shell--tool-call-group-descriptive-text-test ()
+  "Kinds collapse into counted phrases in first-seen order, only the first
+word capitalized, present tense while any member is still unfinished."
+  (cl-flet ((tc (id kind status)
+              (cons id (list (cons :kind kind) (cons :status status))))
+            (text (members)
+              (agent-shell--tool-call-group-descriptive-text :members members)))
+    ;; Multiple kinds, first-seen order, only the first word capitalized.
+    (should (equal "Ran 3 commands, read a file"
+                   (text (list (tc "a" "execute" "completed")
+                               (tc "b" "execute" "completed")
+                               (tc "c" "execute" "completed")
+                               (tc "d" "read" "completed")))))
+    ;; Present tense while pending, past once completed.
+    (should (equal "Run a command" (text (list (tc "a" "execute" "pending")))))
+    (should (equal "Ran a command" (text (list (tc "a" "execute" "completed")))))
+    ;; A single unfinished member lifts the whole kind to present tense.
+    (should (equal "Run 2 commands"
+                   (text (list (tc "a" "execute" "completed")
+                               (tc "b" "execute" "in_progress")))))
+    ;; A failed member still reads past tense (it did run).
+    (should (equal "Ran a command" (text (list (tc "a" "execute" "failed")))))
+    ;; nil kind falls back to the generic phrasing.
+    (should (equal "Ran a tool call" (text (list (tc "a" nil "completed")))))))
 
 (ert-deftest agent-shell--adapt-notification-test ()
   "Test `agent-shell--adapt-notification'."

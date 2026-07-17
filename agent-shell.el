@@ -137,13 +137,15 @@ When non-nil, tool use sections are expanded."
   :type 'boolean
   :group 'agent-shell)
 
-(defcustom agent-shell-tool-use-group-expand-by-default t
-  "Whether the \"Tool calls\" group header is expanded by default.
+(defcustom agent-shell-activity-group-expand-by-default t
+  "Whether an activity group header is expanded by default.
 
-When non-nil (the default), a run of consecutive tool calls shows its
-members.  When nil, the group starts collapsed, showing only the header
-with its aggregated status and completed/total count.  Individual members
-still follow `agent-shell-tool-use-expand-by-default'."
+An activity group is a run of consecutive agent actions (tool calls,
+and eventually thoughts) rendered under one collapsible header.  When
+non-nil (the default), the group shows its members.  When nil, it starts
+collapsed, showing only the header with its aggregated status and
+completed/total count.  Individual members still follow
+`agent-shell-tool-use-expand-by-default'."
   :type 'boolean
   :group 'agent-shell)
 
@@ -1012,7 +1014,7 @@ OUTGOING-REQUEST-DECORATOR (passed through to `acp-make-client')."
         (cons :config-options nil)
         (cons :last-entry-type nil)
         (cons :chunked-group-count 0)
-        (cons :tool-call-group-count 0)
+        (cons :activity-group-count 0)
         (cons :request-count 0)
         (cons :last-activity-time nil)
         (cons :tool-calls nil)
@@ -2095,31 +2097,46 @@ pretty-printed JSON inside a json fence."
               (json-pretty-print-buffer)
               (buffer-string)))))
 
-(defconst agent-shell--tool-call-group-label "Tool calls"
-  "Header label for a collapsible run of consecutive tool calls.")
+(defconst agent-shell--activity-group-label "Activity"
+  "Neutral placeholder heading for an activity group before it is refreshed.
+Shown until `agent-shell--refresh-activity-group-header' relabels the
+group from its members (e.g. \"✓ Tool calls 2/2\").  A group holding only
+thoughts keeps this heading, since the count style counts tool calls.")
 
-(defun agent-shell--tool-call-group-id (state tool-call-id)
-  "Return the group-id assigned to TOOL-CALL-ID, assigning one on first sight.
+(defconst agent-shell--activity-group-run-entry-types
+  '("tool_call" "tool_call_update" "session/request_permission"
+    "agent_thought_chunk")
+  "Entry types that keep the current activity run open.
+Consecutive tool calls and thoughts share one activity group; any other
+rendered entry between them (e.g. a streamed message) starts a fresh one.
+A permission request is part of a tool call's own flow (its dialog is
+transient, deleted on completion), so it must not break the run.")
 
-Consecutive tool calls share a group; any other rendered entry between
-them (e.g. a streamed message) starts a fresh one.  The assignment is
-stored on the tool call and reused by later updates, so a completion
-arriving after an interleaving message keeps its original group.  Advances
-STATE's `:tool-call-group-count' on a new run, mirroring the
-`:chunked-group-count' pattern used for message/thought chunks."
+(defun agent-shell--activity-group-current-id (state)
+  "Return the current activity group id for STATE, advancing on a new run.
+
+Advances STATE's `:activity-group-count' unless `:last-entry-type' keeps
+the run open (see `agent-shell--activity-group-run-entry-types'),
+mirroring the `:chunked-group-count' pattern used for message/thought
+chunks.  Shared by tool-call and thought rendering so both land in the
+same group."
+  (unless (member (map-elt state :last-entry-type)
+                  agent-shell--activity-group-run-entry-types)
+    (map-put! state :activity-group-count
+              (1+ (or (map-elt state :activity-group-count) 0))))
+  (format "activity-%s" (map-elt state :activity-group-count)))
+
+(defun agent-shell--activity-group-id (state tool-call-id)
+  "Return TOOL-CALL-ID's activity group-id in STATE, assigning it on first sight.
+
+The assignment is stored on the tool call and reused by later updates, so
+a completion arriving after an interleaving message keeps its original
+group.  The run counter is shared with thoughts via
+`agent-shell--activity-group-current-id'."
   (or (map-nested-elt state `(:tool-calls ,tool-call-id :group-id))
-      (progn
-        ;; Advance the run counter before formatting the id.  A permission
-        ;; request is part of a tool call's own flow (its dialog is transient,
-        ;; deleted on completion), not interleaved content, so it must not
-        ;; break the run and split the next tool call into a new group.
-        (unless (member (map-elt state :last-entry-type)
-                        '("tool_call" "tool_call_update" "session/request_permission"))
-          (map-put! state :tool-call-group-count
-                    (1+ (or (map-elt state :tool-call-group-count) 0))))
-        (let ((group-id (format "tool-calls-%s" (map-elt state :tool-call-group-count))))
-          (agent-shell--save-tool-call state tool-call-id (list (cons :group-id group-id)))
-          group-id))))
+      (let ((group-id (agent-shell--activity-group-current-id state)))
+        (agent-shell--save-tool-call state tool-call-id (list (cons :group-id group-id)))
+        group-id)))
 
 (defconst agent-shell--tool-call-status-precedence
   '("failed" "in_progress" "pending" "completed")
@@ -2162,7 +2179,7 @@ counts toward the total but not the numerator.
   (let ((glyph (agent-shell--tool-call-group-status-glyph
                 (seq-find (lambda (status) (member status statuses))
                           agent-shell--tool-call-status-precedence)))
-        (heading (propertize agent-shell--tool-call-group-label
+        (heading (propertize "Tool calls"
                              'font-lock-face 'agent-shell-section-heading))
         (count (propertize
                 (format "%d/%d"
@@ -2171,14 +2188,159 @@ counts toward the total but not the numerator.
                 'font-lock-face 'agent-shell-section-annotation)))
     (string-join (delq nil (list glyph heading count)) " ")))
 
-(defun agent-shell--refresh-tool-call-group-header (state group-id)
+(cl-defun agent-shell--group-tool-calls (&key state group-id)
+  "Return (ID . TOOL-CALL) pairs in STATE assigned to GROUP-ID, in call order.
+
+STATE's `:tool-calls' alist stores the most recent call first, so the
+result is reversed to reflect the order the calls were made."
+  (nreverse
+   (seq-keep (lambda (pair)
+               (when (equal (map-elt (cdr pair) :group-id) group-id)
+                 pair))
+             (map-elt state :tool-calls))))
+
+(defconst agent-shell--tool-call-kind-phrases
+  '(("execute" . ((:past . "ran") (:present . "run")
+                  (:singular . "command") (:plural . "commands")))
+    ("read" . ((:past . "read") (:present . "read")
+               (:singular . "file") (:plural . "files")))
+    ("edit" . ((:past . "edited") (:present . "edit")
+               (:singular . "file") (:plural . "files")))
+    ("delete" . ((:past . "deleted") (:present . "delete")
+                 (:singular . "file") (:plural . "files")))
+    ("move" . ((:past . "moved") (:present . "move")
+               (:singular . "file") (:plural . "files")))
+    ("search" . ((:past . "ran") (:present . "run")
+                 (:singular . "search") (:plural . "searches")))
+    ("fetch" . ((:past . "fetched") (:present . "fetch")
+                (:singular . "resource") (:plural . "resources"))))
+  "Per-kind phrasing for descriptive group headers.
+Each entry maps a tool-call kind to an alist with `:past'/`:present'
+verbs and `:singular'/`:plural' nouns.  The present verb is used while
+any member of that kind is still pending or in progress, the past once
+all have finished.  Kinds absent here (including nil and \"other\") fall
+back to `agent-shell--tool-call-kind-phrase-default'.  Verbs are
+lowercase; the assembled summary capitalizes its first word.  See URL
+`https://agentclientprotocol.com/protocol/tool-calls'.")
+
+(defconst agent-shell--tool-call-kind-phrase-default
+  '((:past . "ran") (:present . "run")
+    (:singular . "tool call") (:plural . "tool calls"))
+  "Phrasing for kinds absent from `agent-shell--tool-call-kind-phrases'.")
+
+(cl-defun agent-shell--tool-call-kind-phrase (&key kind count pending)
+  "Return a lowercase phrase for KIND repeated COUNT times.
+When PENDING is non-nil the present-tense verb is used, so a not-yet-run
+action reads \"run a command\" rather than \"ran a command\".  Callers
+capitalize as needed.
+
+  (agent-shell--tool-call-kind-phrase :kind \"execute\" :count 2)
+  ;; => \"ran 2 commands\"
+  (agent-shell--tool-call-kind-phrase :kind \"execute\" :count 1 :pending t)
+  ;; => \"run a command\""
+  (let ((phrase (or (assoc-default kind agent-shell--tool-call-kind-phrases)
+                    agent-shell--tool-call-kind-phrase-default)))
+    (format "%s %s %s"
+            (map-elt phrase (if pending :present :past))
+            (if (= count 1) "a" (number-to-string count))
+            (map-elt phrase (if (= count 1) :singular :plural)))))
+
+(cl-defun agent-shell--tool-call-group-descriptive-text (&key members)
+  "Return a Claude Code style summary phrase for MEMBERS.
+
+MEMBERS is a list of (ID . TOOL-CALL) pairs in call order.  Kinds are
+collapsed into counted phrases joined by commas, e.g. \"Ran 3 commands,
+read a file\", in first-seen order.  Only the first word is capitalized.
+A kind reads in the present tense (\"Run a command\") while any of its
+members is still pending or in progress, past tense once all have
+finished."
+  (let* ((member-kind (lambda (member) (or (map-elt (cdr member) :kind) "other")))
+         (summary
+          (string-join
+           (seq-map
+            (lambda (kind)
+              (let ((of-kind (seq-filter (lambda (member)
+                                           (equal (funcall member-kind member) kind))
+                                         members)))
+                (agent-shell--tool-call-kind-phrase
+                 :kind kind
+                 :count (length of-kind)
+                 :pending (seq-some (lambda (member)
+                                      (member (map-elt (cdr member) :status)
+                                              '("pending" "in_progress")))
+                                    of-kind))))
+            (seq-uniq (seq-map member-kind members)))
+           ", ")))
+    (if (string-empty-p summary)
+        summary
+      (concat (upcase (substring summary 0 1)) (substring summary 1)))))
+
+(defun agent-shell-activity-group-descriptive-label (group)
+  "Return a Claude Code style header label for GROUP.
+
+GROUP is an alist with :state and :group-id.  A group with a single
+member shows that member's own label (like \"Backend modularity and
+dispatch structure\"); larger groups show a counted summary such as
+\"Ran 3 commands, read a file\".  No status glyph is shown, matching
+Claude Code's plain-text grouping.  Returns nil with no members yet.
+See `agent-shell-activity-group-header-label-function'."
+  (when-let* ((members (agent-shell--group-tool-calls
+                        :state (map-elt group :state)
+                        :group-id (map-elt group :group-id))))
+    (or ;; A lone call whose title is a genuine description (a task or
+        ;; MCP tool, of kind nil/"other") stands in for the summary, as
+        ;; Claude Code does.  Standard kinds (execute, read, edit, ...)
+        ;; have titles that are just a command or path already shown on
+        ;; the member row below, so they use the counted summary instead.
+        (and (= (length members) 1)
+             (member (map-elt (cdar members) :kind) '(nil "other"))
+             (map-elt (agent-shell-make-tool-call-label
+                       (map-elt group :state) (caar members))
+                      :title))
+        (propertize (agent-shell--tool-call-group-descriptive-text :members members)
+                    'font-lock-face 'agent-shell-section-heading))))
+
+(defun agent-shell-activity-group-count-label (group)
+  "Return the count-style header label for GROUP.
+GROUP is an alist with :state and :group-id.  Formats as
+\"✓ Tool calls 2/2\".  Returns nil with no members yet.
+See `agent-shell-activity-group-header-label-function'."
+  (when-let* ((statuses (agent-shell--group-tool-statuses
+                         (map-elt group :state) (map-elt group :group-id))))
+    (agent-shell--tool-call-group-header-label statuses)))
+
+(defvar agent-shell-activity-group-header-label-function
+  #'agent-shell-activity-group-count-label
+  "Function that renders a tool-call group's collapsible header label.
+
+Called with an alist containing:
+
+  :state    - the shell state
+  :group-id - the tool-call group id
+
+Returns the propertized header string, or nil when the group has no
+members yet.
+
+Built-in options:
+- `agent-shell-activity-group-count-label' (default) -- count style,
+  e.g. \"✓ Tool calls 2/2\".
+- `agent-shell-activity-group-descriptive-label' -- Claude Code style,
+  e.g. \"Ran 3 commands, read a file\".
+
+This is a plain variable rather than a `defcustom' while the header
+style settles; promote it once the rendering choice is worth exposing.")
+
+(defun agent-shell--refresh-activity-group-header (state group-id)
   "Relabel GROUP-ID's header in STATE from its members' aggregated status.
+Delegates to `agent-shell-activity-group-header-label-function'.
 No-op with no members yet."
-  (when-let* ((statuses (agent-shell--group-tool-statuses state group-id)))
+  (when-let* ((label (funcall agent-shell-activity-group-header-label-function
+                              (list (cons :state state)
+                                    (cons :group-id group-id)))))
     (agent-shell--update-fragment
      :state state
      :block-id group-id
-     :label-left (agent-shell--tool-call-group-header-label statuses)
+     :label-left label
      :above-last-prompt (not (agent-shell--active-requests-p state)))))
 
 (cl-defun agent-shell--on-notification (&key state acp-notification)
@@ -2271,7 +2433,7 @@ No-op with no members yet."
                         (cons :tool-call (map-nested-elt state (list :tool-calls (map-nested-elt acp-notification '(params update toolCallId)))))))
            (let ((tool-call-labels (agent-shell-make-tool-call-label
                                     state (map-nested-elt acp-notification '(params update toolCallId))))
-                 (group-id (agent-shell--tool-call-group-id
+                 (group-id (agent-shell--activity-group-id
                             state (map-nested-elt acp-notification '(params update toolCallId)))))
              (agent-shell--update-fragment
               :state state
@@ -2279,11 +2441,11 @@ No-op with no members yet."
               :label-left (map-elt tool-call-labels :status)
               :label-right (map-elt tool-call-labels :title)
               :group-id group-id
-              :group-label agent-shell--tool-call-group-label
-              :group-expanded agent-shell-tool-use-group-expand-by-default
+              :group-label agent-shell--activity-group-label
+              :group-expanded agent-shell-activity-group-expand-by-default
               :expanded agent-shell-tool-use-expand-by-default
               :above-last-prompt (not (agent-shell--active-requests-p state)))
-             (agent-shell--refresh-tool-call-group-header state group-id)
+             (agent-shell--refresh-activity-group-header state group-id)
              ;; Display plan as markdown block if present
              (when (map-nested-elt acp-notification '(params update rawInput plan))
                (agent-shell--update-fragment
@@ -2302,7 +2464,13 @@ No-op with no members yet."
               :text (format "## Agent's Thoughts (%s)\n\n" (format-time-string "%F %T"))
               :file-path agent-shell--transcript-file))
            (let ((content (agent-shell--content-block-to-markdown
-                           (map-nested-elt acp-notification '(params update content)))))
+                           (map-nested-elt acp-notification '(params update content))))
+                 ;; Share the tool-call run counter so a thought lands in
+                 ;; the same activity group as the surrounding tool calls.
+                 ;; Read before `:last-entry-type' is advanced below;
+                 ;; stable across a thought's streamed chunks since
+                 ;; "agent_thought_chunk" keeps the run open.
+                 (group-id (agent-shell--activity-group-current-id state)))
              (agent-shell--append-transcript
               :text (agent-shell--indent-markdown-headers content)
               :file-path agent-shell--transcript-file)
@@ -2326,6 +2494,9 @@ No-op with no members yet."
               :append (equal (map-elt state :last-entry-type)
                              "agent_thought_chunk")
               :expanded agent-shell-thought-process-expand-by-default
+              :group-id group-id
+              :group-label agent-shell--activity-group-label
+              :group-expanded agent-shell-activity-group-expand-by-default
               :render-body-images t
               :above-last-prompt (not (agent-shell--active-requests-p state))))
            (map-put! state :last-entry-type "agent_thought_chunk"))
@@ -2495,7 +2666,7 @@ No-op with no members yet."
                ;; agent-shell--update-fragment param by "session/request_permission".
                (agent-shell--delete-fragment :state state :block-id (format "permission-%s" (map-nested-elt acp-notification '(params update toolCallId)))))
              (let* ((tool-call-labels (agent-shell-make-tool-call-label state (map-nested-elt acp-notification '(params update toolCallId))))
-                    (group-id (agent-shell--tool-call-group-id
+                    (group-id (agent-shell--activity-group-id
                                state (map-nested-elt acp-notification '(params update toolCallId))))
                     (tool-call-id (map-nested-elt acp-notification '(params update toolCallId)))
                     (saved-command (map-nested-elt state `(:tool-calls ,tool-call-id :command)))
@@ -2522,8 +2693,8 @@ No-op with no members yet."
                 :label-left (map-elt tool-call-labels :status)
                 :label-right (map-elt tool-call-labels :title)
                 :group-id group-id
-                :group-label agent-shell--tool-call-group-label
-                :group-expanded agent-shell-tool-use-group-expand-by-default
+                :group-label agent-shell--activity-group-label
+                :group-expanded agent-shell-activity-group-expand-by-default
                 :body (cond
                        (command-block
                         (concat command-block "\n\n" (string-trim body-text)))
@@ -2533,7 +2704,7 @@ No-op with no members yet."
                         (string-trim body-text)))
                 :expanded agent-shell-tool-use-expand-by-default
                 :above-last-prompt (not (agent-shell--active-requests-p state)))
-               (agent-shell--refresh-tool-call-group-header state group-id))
+               (agent-shell--refresh-activity-group-header state group-id))
              ;; Only advance the run boundary when this update introduced a new
              ;; tool call (appended at the end).  An in-place update of an
              ;; earlier tool must not erase an intervening entry's boundary.
