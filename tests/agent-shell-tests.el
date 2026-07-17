@@ -4220,6 +4220,59 @@ between two tool calls keeps them together."
       (should (equal "tool-calls-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
       (should (equal "tool-calls-1" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
 
+(ert-deftest agent-shell--tool-call-grouping-permission-keeps-group-test ()
+  "A tool call that required a permission prompt stays grouped with the next.
+Regression: `session/request_permission' set `:last-entry-type', which
+advanced the group counter and split the following tool call into its own
+group even though the permission dialog is transient (deleted on
+completion) and renders no lasting interleaved content."
+  (let* ((buffer (generate-new-buffer " *permission-group-test*"))
+         (state (list (cons :tool-calls nil)
+                      (cons :last-entry-type nil)
+                      (cons :tool-call-group-count 0)
+                      (cons :chunked-group-count 0)
+                      (cons :active-requests t)
+                      (cons :last-activity-time nil)
+                      (cons :buffer buffer))))
+    (unwind-protect
+    (cl-letf (((symbol-function 'agent-shell--update-fragment) #'ignore)
+              ((symbol-function 'agent-shell--refresh-tool-call-group-header) #'ignore)
+              ((symbol-function 'agent-shell--append-transcript) #'ignore)
+              ((symbol-function 'agent-shell--make-transcript-tool-call-entry)
+               (lambda (&rest _) ""))
+              ((symbol-function 'agent-shell--delete-fragment) #'ignore)
+              ((symbol-function 'agent-shell--cancel-idle-timer) #'ignore)
+              ((symbol-function 'agent-shell--start-idle-timer) #'ignore)
+              ((symbol-function 'agent-shell--emit-event) #'ignore)
+              ((symbol-function 'agent-shell--make-permission-actions) (lambda (&rest _) nil))
+              ((symbol-function 'agent-shell--make-tool-call-permission-text)
+               (lambda (&rest _) ""))
+              ((symbol-function 'agent-shell-make-tool-call-label)
+               (lambda (&rest _) '((:status . "s") (:title . "t")))))
+      (cl-flet ((notify (update)
+                  (agent-shell--on-notification
+                   :state state
+                   :acp-notification `((method . "session/update")
+                                       (params (update . ,update)))))
+                (request (obj)
+                  (agent-shell--on-request :state state :acp-request obj)))
+        (notify '((sessionUpdate . "tool_call") (toolCallId . "A")
+                  (title . "A") (kind . "other") (status . "pending")))
+        ;; A requires approval; the permission request arrives mid-flight.
+        (request '((method . "session/request_permission") (id . 5)
+                   (params (options . [])
+                           (toolCall (toolCallId . "A") (title . "A") (kind . "other")))))
+        (notify '((sessionUpdate . "tool_call_update") (toolCallId . "A")
+                  (status . "completed")
+                  (content . [((type . "content")
+                               (content (type . "text") (text . "done")))])))
+        (notify '((sessionUpdate . "tool_call") (toolCallId . "B")
+                  (title . "B") (kind . "other") (status . "pending"))))
+      ;; A and B are consecutive with no interleaved content — one group.
+      (should (equal (map-nested-elt state '(:tool-calls "A" :group-id))
+                     (map-nested-elt state '(:tool-calls "B" :group-id)))))
+      (kill-buffer buffer))))
+
 (ert-deftest agent-shell--tool-call-group-header-label-test ()
   "Header glyph is `completed' only when all are (else the worst present),
 and the completed/total count lets a non-completed member lift the total only."

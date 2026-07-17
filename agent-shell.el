@@ -2109,9 +2109,12 @@ STATE's `:tool-call-group-count' on a new run, mirroring the
 `:chunked-group-count' pattern used for message/thought chunks."
   (or (map-nested-elt state `(:tool-calls ,tool-call-id :group-id))
       (progn
-        ;; Advance the run counter before formatting the id.
+        ;; Advance the run counter before formatting the id.  A permission
+        ;; request is part of a tool call's own flow (its dialog is transient,
+        ;; deleted on completion), not interleaved content, so it must not
+        ;; break the run and split the next tool call into a new group.
         (unless (member (map-elt state :last-entry-type)
-                        '("tool_call" "tool_call_update"))
+                        '("tool_call" "tool_call_update" "session/request_permission"))
           (map-put! state :tool-call-group-count
                     (1+ (or (map-elt state :tool-call-group-count) 0))))
         (let ((group-id (format "tool-calls-%s" (map-elt state :tool-call-group-count))))
