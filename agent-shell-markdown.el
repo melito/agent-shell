@@ -86,7 +86,7 @@
   :group 'agent-shell-markdown)
 
 (defface agent-shell-markdown-inline-code
-  '((t :inherit font-lock-doc-markup-face))
+  '((t :inherit org-code))
   "Face for inline code rendered by `agent-shell-markdown-convert'."
   :group 'agent-shell-markdown)
 

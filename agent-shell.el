@@ -2322,7 +2322,7 @@ See `agent-shell-activity-group-header-label-function'."
      ((or members thought)
       (propertize (agent-shell--tool-call-group-descriptive-text
                    :members members :thought thought)
-                  'font-lock-face 'agent-shell-section-heading)))))
+                  'font-lock-face 'agent-shell-secondary)))))
 
 (defun agent-shell-activity-group-count-label (group)
   "Return the count-style header label for GROUP.
@@ -3118,7 +3118,7 @@ https://agentclientprotocol.com/protocol/schema#param-stop-reason"
                    'font-lock-face 'agent-shell-list-name)
        "\n"
        (propertize (map-elt cmd 'description)
-                   'font-lock-face 'agent-shell-list-description)))
+                   'font-lock-face 'agent-shell-secondary)))
     commands)
    "\n\n"))
 
@@ -3188,7 +3188,7 @@ Example output:
                (lambda (pair)
                  (when (cdr pair)
                    (propertize (cdr pair)
-                               'font-lock-face 'agent-shell-list-description))))
+                               'font-lock-face 'agent-shell-secondary))))
      :joiner "\n")))
 
 (cl-defun agent-shell--make-diff-infos (&key acp-tool-call)
@@ -9151,7 +9151,7 @@ with ON-SUCCESS function."
                                 'font-lock-face 'agent-shell-list-name)))
             (desc (when (map-elt mode :description)
                     (propertize (map-elt mode :description)
-                                'font-lock-face 'agent-shell-list-description))))
+                                'font-lock-face 'agent-shell-secondary))))
         (if desc
             (concat name "\n" desc)
           name)))
@@ -9172,7 +9172,7 @@ with ON-SUCCESS function."
                                  'font-lock-face 'agent-shell-list-name))))
             (desc (when (map-elt model :description)
                     (propertize (map-elt model :description)
-                                'font-lock-face 'agent-shell-list-description))))
+                                'font-lock-face 'agent-shell-secondary))))
         (if desc
             (concat name "\n" desc)
           name)))
