@@ -794,7 +794,7 @@ For example, to hide the Downloads and temp choices:
   (setq agent-shell-session-choices-function
         (lambda (choices)
           (seq-remove (lambda (choice)
-                        (memq (cdr choice) '(:downloads-shell :temp-shell)))
+                        (memq (cdr choice) \='(:downloads-shell :temp-shell)))
                       choices)))"
   :type '(choice (const :tag "Offer all choices" nil)
                  (function :tag "Transform function"))
