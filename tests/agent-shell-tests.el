@@ -937,13 +937,13 @@ _world_")
                        1500))))))
 
 (ert-deftest agent-shell--send-command-preserves-viewport-edit-draft-test ()
-  "Sending a command must not discard an in-progress viewport edit draft.
+  "Sending a command must not disturb an in-progress viewport edit draft.
 
-When a queued request is processed while the user is composing a
-message in the viewport edit buffer, `agent-shell--send-command'
-switches the viewport to view mode and re-initializes (erasing)
-the buffer.  The draft must be saved to the compose snapshot so
-it can be restored when the user returns to edit mode."
+When a queued or external request is processed while the user is
+composing in the viewport edit buffer, `agent-shell--send-command'
+must leave that buffer untouched.  It only refreshes the viewport
+when it is displaying the conversation (view mode), so an active
+compose buffer keeps its draft in place and stays in edit mode."
   (let ((agent-shell-header-style 'graphical)
         (agent-shell-show-busy-indicator nil)
         (agent-shell--state (list (cons :buffer (current-buffer))
@@ -975,13 +975,14 @@ it can be restored when the user returns to edit mode."
             (agent-shell--send-command
              :prompt "queued prompt"
              :shell-buffer (current-buffer)))
-          ;; The buffer now shows the submitted prompt in view mode,
-          ;; and the in-progress draft was wiped from the buffer...
-          (should-not (string-match-p "my important draft" (buffer-string)))
-          ;; ...but the draft survived in the compose snapshot.
-          (should agent-shell-viewport--compose-snapshot)
-          (should (equal (map-elt agent-shell-viewport--compose-snapshot :content)
-                         "my important draft")))))))
+          ;; The draft is left in place, untouched.
+          (should (string-match-p "my important draft" (buffer-string)))
+          ;; The buffer stays in edit mode, not hijacked to view mode.
+          (should (derived-mode-p 'agent-shell-viewport-edit-mode))
+          ;; The submitted prompt did not take over the buffer.
+          (should-not (string-match-p "queued prompt" (buffer-string)))
+          ;; No snapshot is needed since nothing was wiped.
+          (should-not agent-shell-viewport--compose-snapshot))))))
 
 (ert-deftest agent-shell--format-diff-as-text-test ()
   "Test `agent-shell--format-diff-as-text' function."
