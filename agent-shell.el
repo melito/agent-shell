@@ -5442,9 +5442,18 @@ recorded in STATE and released by `agent-shell--uninhibit-sleep'."
   ;; Block system idle sleep but allow the display to blank.
   (when-let* ((agent-shell-inhibit-system-sleep)
               ((not (map-elt state :sleep-token)))
-              ((fboundp 'system-sleep-block-sleep))
-              (token (system-sleep-block-sleep "agent-shell (agent busy)" t)))
-    (map-put! state :sleep-token token)))
+              ((fboundp 'system-sleep-block-sleep)))
+    ;; `system-sleep-block-sleep' talks to logind over D-Bus, which can fail
+    ;; (e.g. "Permission denied" under WSL where no logind session exists).
+    ;; Degrade gracefully instead of letting the error break event dispatch.
+    ;; Report the failure so the user can set `agent-shell-inhibit-system-sleep'
+    ;; to nil to opt out.
+    (condition-case err
+        (when-let* ((token (system-sleep-block-sleep "agent-shell (agent busy)" t)))
+          (map-put! state :sleep-token token))
+      (error
+       (message "Sleep inhibit unavailable (%s).  Set `agent-shell-inhibit-system-sleep' to nil to disable."
+                (error-message-string err))))))
 
 (defun agent-shell--uninhibit-sleep (state)
   "Release any system sleep block held by STATE's shell."
