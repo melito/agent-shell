@@ -2374,21 +2374,18 @@ See `agent-shell-activity-group-header-label-function'."
 (defun agent-shell-activity-group-count-label (group)
   "Return the count-style header label for GROUP.
 GROUP is an alist with :state and :group-id.  Formats as
-\"✓ Activity 2/2\", folding any thoughts into the count as completed
-items (each thought is done), so a group of 2 tool calls and a thought
-reads \"✓ Activity 3/3\".  A group holding only thoughts (no tool
-calls) reads \"Thinking\".  Returns nil with nothing in the group yet.
+\"✓ Activity 2/2\", counting each tool call and thought as one item (a
+thought is always done), so a group of 2 tool calls and a thought reads
+\"✓ Activity 3/3\" and a thought-only group reads \"✓ Activity 1/1\".
+Returns nil with nothing in the group yet.
 See `agent-shell-activity-group-header-label-function'."
   (let* ((state (map-elt group :state))
          (group-id (map-elt group :group-id))
-         (statuses (agent-shell--group-tool-statuses state group-id))
-         (thought-count (agent-shell--group-thought-count state group-id)))
-    (cond
-     (statuses
-      (agent-shell--activity-group-header-label
-       (append statuses (make-list thought-count "completed"))))
-     ((> thought-count 0)
-      (propertize "Thinking" 'font-lock-face 'agent-shell-section-heading)))))
+         (statuses (append (agent-shell--group-tool-statuses state group-id)
+                           (make-list (agent-shell--group-thought-count state group-id)
+                                      "completed"))))
+    (when statuses
+      (agent-shell--activity-group-header-label statuses))))
 
 (defun agent-shell-activity-group-tally-label (group)
   "Return a per-category tally header for GROUP.

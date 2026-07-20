@@ -4545,7 +4545,7 @@ thought."
       (should (= 0 (agent-shell--group-thought-count state "other"))))
     ;; Thought-only group.
     (let ((state (state-with nil '(("g" . 1)))))
-      (should (equal "Thinking" (count state)))
+      (should (equal "✓ Activity 1/1" (count state)))
       (should (equal "Thought" (descriptive state))))
     ;; Mixed group: count tallies tools; descriptive mentions the thought.
     (let ((state (state-with '(("t1" (:group-id . "g") (:kind . "execute")
