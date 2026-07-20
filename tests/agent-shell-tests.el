@@ -4308,7 +4308,7 @@ agent activity), while an `agent_message_chunk' starts a fresh group."
     (map-put! state :last-entry-type "agent_message_chunk")
     (should (equal "activity-2" (agent-shell--activity-group-current-id state)))))
 
-(ert-deftest agent-shell--tool-call-grouping-late-update-starts-new-group-test ()
+(ert-deftest agent-shell--activity-grouping-late-update-starts-new-group-test ()
   "A message between a tool call and the next starts a fresh group.
 Regression for xenodium/agent-shell-js#31: a late in-place completion
 update for an earlier tool must not clobber the run boundary an
@@ -4353,7 +4353,7 @@ group-id helper alone."
       (should (equal "activity-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
       (should (equal "activity-2" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
 
-(ert-deftest agent-shell--tool-call-grouping-consecutive-share-group-test ()
+(ert-deftest agent-shell--activity-grouping-consecutive-share-group-test ()
   "Consecutive tool calls (no interleaving entry) share one group.
 Guards that the #31 fix does not over-split: an in-place completion update
 between two tool calls keeps them together."
@@ -4391,7 +4391,7 @@ between two tool calls keeps them together."
       (should (equal "activity-1" (map-nested-elt state '(:tool-calls "A" :group-id))))
       (should (equal "activity-1" (map-nested-elt state '(:tool-calls "B" :group-id)))))))
 
-(ert-deftest agent-shell--tool-call-grouping-permission-keeps-group-test ()
+(ert-deftest agent-shell--activity-grouping-permission-keeps-group-test ()
   "A tool call that required a permission prompt stays grouped with the next.
 Regression: `session/request_permission' set `:last-entry-type', which
 advanced the group counter and split the following tool call into its own
@@ -4444,25 +4444,25 @@ completion) and renders no lasting interleaved content."
                      (map-nested-elt state '(:tool-calls "B" :group-id)))))
       (kill-buffer buffer))))
 
-(ert-deftest agent-shell--tool-call-group-header-label-test ()
+(ert-deftest agent-shell--activity-group-header-label-test ()
   "Header glyph is `completed' only when all are (else the worst present),
 and the completed/total count lets a non-completed member lift the total only."
   (cl-flet ((label (statuses)
               (substring-no-properties
-               (agent-shell--tool-call-group-header-label statuses))))
+               (agent-shell--activity-group-header-label statuses))))
     ;; All completed: check glyph and full count.
     (should (string-prefix-p "✓" (label '("completed" "completed"))))
-    (should (string-suffix-p "Tool calls 5/5"
+    (should (string-suffix-p "Activity 5/5"
                              (label '("completed" "completed" "completed"
                                       "completed" "completed"))))
     ;; A failure dominates and drops the numerator.
     (should (string-prefix-p "✗" (label '("failed" "in_progress" "completed"))))
-    (should (string-suffix-p "Tool calls 3/5"
+    (should (string-suffix-p "Activity 3/5"
                              (label '("completed" "completed" "completed"
                                       "failed" "failed"))))
     ;; In-progress dominates when nothing failed.
     (should (string-prefix-p "…" (label '("completed" "pending" "in_progress"))))
-    (should (string-suffix-p "Tool calls 2/5"
+    (should (string-suffix-p "Activity 2/5"
                              (label '("completed" "completed" "in_progress"
                                       "pending" "in_progress"))))))
 
@@ -4478,13 +4478,13 @@ and the completed/total count lets a non-completed member lift the total only."
   (should (equal "ran 3 tool calls"
                  (agent-shell--tool-call-kind-phrase :kind "mystery" :count 3))))
 
-(ert-deftest agent-shell--tool-call-group-descriptive-text-test ()
+(ert-deftest agent-shell--activity-group-descriptive-text-test ()
   "Kinds collapse into counted phrases in first-seen order, only the first
 word capitalized, present tense while any member is still unfinished."
   (cl-flet ((tc (id kind status)
               (cons id (list (cons :kind kind) (cons :status status))))
             (text (members &optional thought)
-              (agent-shell--tool-call-group-descriptive-text
+              (agent-shell--activity-group-descriptive-text
                :members members :thought thought)))
     ;; Multiple kinds, first-seen order, only the first word capitalized.
     (should (equal "Ran 3 commands, read a file"
@@ -4509,16 +4509,24 @@ word capitalized, present tense while any member is still unfinished."
                                (tc "b" "execute" "completed"))
                          t)))
     ;; A thought with no tool calls reads just "Thought".
-    (should (equal "Thought" (text nil t)))))
+    (should (equal "Thought" (text nil t)))
+    ;; A `think'-kind call folds into "Thought" like a chunk, not counted.
+    (should (equal "Thought" (text (list (tc "a" "think" "completed")))))
+    ;; It folds even alongside counted tool calls.
+    (should (equal "Thought, ran a command"
+                   (text (list (tc "a" "think" "completed")
+                               (tc "b" "execute" "completed")))))
+    ;; A `think'-kind call and a thought chunk still read a single "Thought".
+    (should (equal "Thought" (text (list (tc "a" "think" "completed")) t)))))
 
 (ert-deftest agent-shell--activity-group-thought-labels-test ()
   "Header labels reflect thoughts recorded on a group.
 A thought-only group reads \"Thinking\" (count) / \"Thought\" (descriptive);
 a mixed group counts its tools and, in descriptive style, mentions the
 thought."
-  (cl-flet ((state-with (tool-calls thought-groups)
+  (cl-flet ((state-with (tool-calls thought-counts)
               (list (cons :tool-calls tool-calls)
-                    (cons :activity-thoughts thought-groups)))
+                    (cons :activity-thoughts thought-counts)))
             (count (state)
               (substring-no-properties
                (agent-shell-activity-group-count-label
@@ -4527,23 +4535,69 @@ thought."
               (substring-no-properties
                (agent-shell-activity-group-descriptive-label
                 (list (cons :state state) (cons :group-id "g"))))))
-    ;; Marking is idempotent and queryable.
+    ;; Counting accumulates and is queryable per group.
     (let ((state (state-with nil nil)))
-      (agent-shell--mark-group-thought state "g")
-      (agent-shell--mark-group-thought state "g")
+      (agent-shell--count-group-thought state "g")
+      (agent-shell--count-group-thought state "g")
+      (should (= 2 (agent-shell--group-thought-count state "g")))
       (should (agent-shell--group-has-thought-p state "g"))
       (should-not (agent-shell--group-has-thought-p state "other"))
-      (should (equal '("g") (map-elt state :activity-thoughts))))
+      (should (= 0 (agent-shell--group-thought-count state "other"))))
     ;; Thought-only group.
-    (let ((state (state-with nil '("g"))))
+    (let ((state (state-with nil '(("g" . 1)))))
       (should (equal "Thinking" (count state)))
       (should (equal "Thought" (descriptive state))))
     ;; Mixed group: count tallies tools; descriptive mentions the thought.
     (let ((state (state-with '(("t1" (:group-id . "g") (:kind . "execute")
                                 (:status . "completed")))
-                             '("g"))))
-      (should (equal "✓ Tool calls 1/1" (count state)))
+                             '(("g" . 1)))))
+      (should (equal "✓ Activity 2/2" (count state)))
       (should (equal "Thought, ran a command" (descriptive state))))))
+
+(ert-deftest agent-shell--activity-group-tally-label-test ()
+  "Tally label counts tool calls by category plus thoughts, non-zero only.
+Categories render in a fixed order; untyped/MCP calls fold into Other and
+think-kind calls into Thinking."
+  (cl-flet ((tc (id kind)
+              (cons id (list (cons :group-id "g") (cons :kind kind)
+                             (cons :status "completed"))))
+            (tally (state)
+              (when-let* ((s (agent-shell-activity-group-tally-label
+                              (list (cons :state state) (cons :group-id "g")))))
+                (substring-no-properties s))))
+    ;; Full mix, fixed order (Commands, Reads, Edits, Moves, Deletes,
+    ;; Thinking), thoughts from the count.
+    (should (equal "Commands: 1 Reads: 2 Edits: 1 Thinking: 3"
+                   (tally (list (cons :tool-calls
+                                      (list (tc "a" "read") (tc "b" "read")
+                                            (tc "c" "edit") (tc "d" "execute")))
+                                (cons :activity-thoughts '(("g" . 3)))))))
+    ;; Edits, moves and deletes are their own categories, in order.
+    (should (equal "Edits: 1 Moves: 1 Deletes: 1"
+                   (tally (list (cons :tool-calls
+                                      (list (tc "a" "edit") (tc "b" "delete") (tc "c" "move")))
+                                (cons :activity-thoughts nil)))))
+    ;; Searches/Fetches; untyped + \"other\" fold into Other; think-kind
+    ;; calls fold into Thinking alongside thought-chunk counts.
+    (should (equal "Searches: 1 Fetches: 1 Other: 2 Thinking: 2"
+                   (tally (list (cons :tool-calls
+                                      (list (tc "a" "search") (tc "b" "fetch")
+                                            (tc "c" "other") (tc "d" nil) (tc "e" "think")))
+                                (cons :activity-thoughts '(("g" . 1)))))))
+    ;; Thought-only group.
+    (should (equal "Thinking: 1"
+                   (tally (list (cons :tool-calls nil)
+                                (cons :activity-thoughts '(("g" . 1)))))))
+    ;; Nothing to count -> nil.
+    (should-not (tally (list (cons :tool-calls nil) (cons :activity-thoughts nil))))
+    ;; Two-tone: label uses the heading face, count uses the default face.
+    (let ((s (agent-shell-activity-group-tally-label
+              (list (cons :state (list (cons :tool-calls (list (tc "a" "execute")))
+                                       (cons :activity-thoughts nil)))
+                    (cons :group-id "g")))))
+      (should (equal "Commands: 1" (substring-no-properties s)))
+      (should (eq 'agent-shell-section-heading (get-text-property 0 'font-lock-face s)))
+      (should (eq 'default (get-text-property (1- (length s)) 'font-lock-face s))))))
 
 (ert-deftest agent-shell--adapt-notification-test ()
   "Test `agent-shell--adapt-notification'."
