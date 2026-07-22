@@ -138,7 +138,7 @@ When non-nil, tool use sections are expanded."
   :type 'boolean
   :group 'agent-shell)
 
-(defcustom agent-shell-activity-group-expand-by-default t
+(defcustom agent-shell-activity-group-expand-by-default nil
   "Whether an activity group header is expanded by default.
 
 An activity group is a run of consecutive agent actions (tool calls,
